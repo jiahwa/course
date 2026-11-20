@@ -1,0 +1,9 @@
+node_modules/
+dist/
+db/course.db
+db/course.db-shm
+db/course.db-wal
+.bench/token
+.bench/snapshots/*
+.bench/log/*
+.DS_Store
