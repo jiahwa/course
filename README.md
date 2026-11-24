@@ -71,6 +71,7 @@ npm test                      # node:test
 | `src/db/index.ts` | 唯一的库入口：打开、迁移、待应用检查 |
 | `src/gate.ts` | 授权位读写与事件记录 |
 | `db/migrations/` | 结构变更，只增不改 |
+| `.bench/skills/30-layout.md` | 课程页两套排版（卡片 / 立体书架）的规格 |
 | `web/` | 四个页签：课程 / 检索 / 记录 / 设置 |
 | `content/` | md 编辑源，M1 接入 sync |
 | `.bench/skills/` | 站点规格书，`00-charter.md` 是章程 |
@@ -107,3 +108,12 @@ M0 骨架 + M1 内容管道：3 门示例课 7 章（人工智能导论 / 分布
 ## 请示入口
 
 改站之前先读 `.bench/skills/`；改完站必须回头改说明书，没写说明书的改动不算完成。
+
+## 课程页排版
+
+课程页有两套排版，右上角切换，选择记在 `localStorage` 的 `course.layout`：
+
+- **卡片**（默认）：每门课一张卡，纵向列表。
+- **立体书架**：纯 CSS 3D（`perspective` + `translate3d`，零依赖），一排书脊立在隔板上。
+
+书架下方是操控盘：`← →` 平移、`↑ ↓` 前后进深、中间 `·` 复位、右侧「进入 / 退出」。键盘 `←→↑↓` 推视角，`Enter` 进入，`Esc` 复位；点书选中，双击进入。规格见 `.bench/skills/30-layout.md`。

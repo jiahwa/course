@@ -96,3 +96,13 @@ curl /api/course?slug=ai-intro   3 章，字数 163/148/135
 ## 纪律
 
 一次只改一件事；先 md 后代码；不过 verify 不落地；被否的方案不换名重做。
+
+## 课程页排版双风格（M1 追加）
+
+课程页加了两套排版，可切换，选择存 `localStorage: course.layout`：
+
+- 卡片 `cards`：原样保留，默认态。
+- 立体书架 `shelf`：纯 CSS 3D（`perspective: 900px` + `preserve-3d` + `translate3d`），零新增依赖。每本书是一个薄盒（书脊 + 书页厚度面），高度按章节数算。
+- 操控：`←/→` 平移（±460）、`↑/↓` 进深（-140…300）、`·` 复位，「进入 / 退出」；键盘 `←→↑↓ / Enter / Esc` 等价；单击选书、双击进入。
+- 验收：711×766 视口内书架与 HUD 完整可见；切换往返不丢状态；「进入」正确打开 `/api/course` 对应课程。
+- 说明书：新增 `.bench/skills/30-layout.md`（covers `ui:layout`、`ui:shelf`）。

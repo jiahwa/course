@@ -191,8 +191,166 @@ function Markdown({ text }: { text: string }) {
 
 /* ---------- 页面 ---------- */
 
+type Layout = "cards" | "shelf";
+
+const storeKey = "course.layout";
+
+function Cards({ items, onOpen }: { items: Course[]; onOpen: (slug: string) => void }) {
+  return (
+    <div className="cards">
+      {items.map((c) => (
+        <article key={c.id} className="card">
+          <div className="card-top">
+            <span className="disc">{c.discipline}</span>
+            <span className="meta">
+              {c.chapters} 章 · 更新 {day(c.updatedAt)}
+            </span>
+          </div>
+          <h2 className="card-title">{c.title}</h2>
+          {c.summary ? <p className="card-sum">{c.summary}</p> : null}
+          <div className="card-foot">
+            <button className="link" onClick={() => onOpen(c.slug)}>
+              进入
+            </button>
+          </div>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+// 立体书架：纯 CSS 3D（perspective + translate3d），不引任何库。
+// 视角状态只有三个数字：左右平移、前后进深、键盘也能推。
+function Shelf({ items, onOpen }: { items: Course[]; onOpen: (slug: string) => void }) {
+  const [cam, setCam] = useState({ x: 0, z: 0 });
+  const [focus, setFocus] = useState(0);
+
+  const move = (dx: number, dz: number) =>
+    setCam((c) => ({
+      x: Math.min(460, Math.max(-460, c.x + dx)),
+      z: Math.min(300, Math.max(-140, c.z + dz)),
+    }));
+
+  const reset = () => {
+    setCam({ x: 0, z: 0 });
+    setFocus(0);
+  };
+
+  useEffect(() => {
+    if (focus >= items.length) setFocus(Math.max(0, items.length - 1));
+  }, [items.length, focus]);
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA")) return;
+      if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        move(120, 0);
+      } else if (e.key === "ArrowRight") {
+        e.preventDefault();
+        move(-120, 0);
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        move(0, 80);
+      } else if (e.key === "ArrowDown") {
+        e.preventDefault();
+        move(0, -80);
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        const c = items[focus];
+        if (c) onOpen(c.slug);
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        reset();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [items, focus]);
+
+  const height = (c: Course) => Math.min(240, 150 + c.chapters * 16);
+  const now = items[focus];
+
+  return (
+    <div className="shelf-wrap">
+      <div className="shelf-stage">
+        <div className="shelf-anchor">
+          <div className="shelf" style={{ transform: `translate3d(${cam.x}px, 0px, ${cam.z}px)` }}>
+            {items.map((c, i) => (
+              <button
+                key={c.id}
+                type="button"
+                className={i === focus ? "book on" : "book"}
+                style={{ "--h": `${height(c)}px` } as React.CSSProperties}
+                onClick={() => setFocus(i)}
+                onDoubleClick={() => onOpen(c.slug)}
+                title={`${c.title}（双击进入）`}
+              >
+                <span className="book-spine">
+                  <em className="book-title">{c.title}</em>
+                  <i className="book-disc">{c.discipline}</i>
+                </span>
+                <span className="book-side" />
+              </button>
+            ))}
+            <span className="board" />
+          </div>
+        </div>
+        <span className="stage-vignette" />
+      </div>
+
+      <div className="shelf-hud">
+        <div className="hud-now">
+          <span className="hud-label">选中</span>
+          <span className="hud-title">{now ? now.title : "—"}</span>
+          <span className="hud-sub">
+            {now ? `${now.chapters} 章 · ${now.discipline} · 更新 ${day(now.updatedAt)}` : ""}
+          </span>
+        </div>
+
+        <div className="hud-keys">
+          <div className="pad" role="group" aria-label="视角">
+            <span />
+            <button type="button" onClick={() => move(0, 80)} title="前进（Enter 也可进入）">
+              ↑
+            </button>
+            <span />
+            <button type="button" onClick={() => move(120, 0)} title="往左（←）">
+              ←
+            </button>
+            <button type="button" onClick={reset} title="复位（Esc）">
+              ·
+            </button>
+            <button type="button" onClick={() => move(-120, 0)} title="往右（→）">
+              →
+            </button>
+            <span />
+            <button type="button" onClick={() => move(0, -80)} title="后退（↓）">
+              ↓
+            </button>
+            <span />
+          </div>
+          <div className="pad-act">
+            <button type="button" className="act on" onClick={() => now && onOpen(now.slug)}>
+              进入
+            </button>
+            <button type="button" className="act" onClick={reset}>
+              退出
+            </button>
+          </div>
+        </div>
+      </div>
+      <p className="hud-hint">方向键推视角，Enter 进入，Esc 复位。也可以直接点书、双击进入。</p>
+    </div>
+  );
+}
+
 function Courses({ onOpen }: { onOpen: (slug: string) => void }) {
   const [items, setItems] = useState<Course[] | null>(null);
+  const [layout, setLayout] = useState<Layout>(() =>
+    localStorage.getItem(storeKey) === "shelf" ? "shelf" : "cards",
+  );
 
   useEffect(() => {
     fetch("/api/courses")
@@ -201,10 +359,26 @@ function Courses({ onOpen }: { onOpen: (slug: string) => void }) {
       .catch(() => setItems([]));
   }, []);
 
+  useEffect(() => {
+    localStorage.setItem(storeKey, layout);
+  }, [layout]);
+
   return (
     <section className="page">
-      <p className="eyebrow">课程</p>
-      <h1 className="headline">书架</h1>
+      <div className="page-head">
+        <div>
+          <p className="eyebrow">课程</p>
+          <h1 className="headline">书架</h1>
+        </div>
+        <div className="layout-switch" role="group" aria-label="排版风格">
+          <button type="button" className={layout === "cards" ? "on" : ""} onClick={() => setLayout("cards")}>
+            卡片
+          </button>
+          <button type="button" className={layout === "shelf" ? "on" : ""} onClick={() => setLayout("shelf")}>
+            立体书架
+          </button>
+        </div>
+      </div>
       <p className="lede">多课程并列，按需查阅。内容在库，md 只是编辑源。</p>
 
       {items === null ? (
@@ -217,26 +391,10 @@ function Courses({ onOpen }: { onOpen: (slug: string) => void }) {
             还没有课程。把板书放进 <code>content/</code>，跑 <code>npm run sync</code> 入库后这里才会出现。
           </span>
         </div>
+      ) : layout === "cards" ? (
+        <Cards items={items} onOpen={onOpen} />
       ) : (
-        <div className="cards">
-          {items.map((c) => (
-            <article key={c.id} className="card">
-              <div className="card-top">
-                <span className="disc">{c.discipline}</span>
-                <span className="meta">
-                  {c.chapters} 章 · 更新 {day(c.updatedAt)}
-                </span>
-              </div>
-              <h2 className="card-title">{c.title}</h2>
-              {c.summary ? <p className="card-sum">{c.summary}</p> : null}
-              <div className="card-foot">
-                <button className="link" onClick={() => onOpen(c.slug)}>
-                  进入
-                </button>
-              </div>
-            </article>
-          ))}
-        </div>
+        <Shelf items={items} onOpen={onOpen} />
       )}
     </section>
   );
@@ -410,8 +568,9 @@ function Search({
   return (
     <section className="page">
       <p className="eyebrow">检索</p>
-      <h1 className="headline">查得到才算存下</h1>
-      <p className="lede">全文检索标题与正文，中文子串可用。AI 语义检索是 TODO，先不假装有。</p>
+      <h1 className="headline">内容检索</h1>
+      <p className="lede">全文检索标题与正文。</p>
+      {/* <p>AI 语义检索是 TODO，先不假装有。</p> */}
 
       <div className="searchbox">
         <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="输入关键词，至少两字" />
@@ -456,8 +615,8 @@ function Recent({ onOpenChapter }: { onOpenChapter: (course: string, slug: strin
   return (
     <section className="page">
       <p className="eyebrow">记录</p>
-      <h1 className="headline">翻过的地方</h1>
-      <p className="lede">只记事实：哪一章、开过几次、最后一次什么时候。不做打卡，不排名。</p>
+      <h1 className="headline">最近浏览</h1>
+      {/* <p className="lede">只记事实：哪一章、开过几次、最后一次什么时候。不做打卡，不排名。</p> */}
 
       {items === null ? (
         <p className="hint">读取中…</p>
@@ -491,8 +650,8 @@ function Settings() {
   return (
     <section className="page">
       <p className="eyebrow">设置</p>
-      <h1 className="headline">一道闸</h1>
-      <p className="lede">全站只有这一个开关与迭代相关。它表示此刻允许 AI 按 skills 动手改站，不代表任何执行能力。</p>
+      <h1 className="headline">AI设置</h1>
+      <p className="lede">授权开关设置，不代表任何执行能力。</p>
 
       <div className="switch-row">
         <div>

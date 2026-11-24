@@ -1,8 +1,8 @@
 ---
 name: charter
 scope: 全站
-covers: [content:uid, content:md, script:sync, schema:settings, schema:courses, schema:chapters, schema:views, schema:events, schema:chapters_fts, api:/api/health, api:/api/courses, api:/api/search, api:/api/recent, api:/api/view, api:/api/chapter, api:/api/course, api:/api/gate, web:courses, web:course, web:chapter, web:search, web:recent, web:settings]
-last-applied: 2026-11-20
+covers: [content:uid, content:md, script:sync, schema:settings, schema:courses, schema:chapters, schema:views, schema:events, schema:chapters_fts, api:/api/health, api:/api/courses, api:/api/search, api:/api/recent, api:/api/view, api:/api/chapter, api:/api/course, api:/api/gate, web:courses, ui:layout, ui:shelf, web:course, web:chapter, web:search, web:recent, web:settings]
+last-applied: 2026-11-24
 ---
 
 # 00 · 章程
