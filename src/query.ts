@@ -11,7 +11,16 @@ export type CourseRow = {
   discipline: string;
   summary: string;
   chapters: number;
+  shelfId: number | null;
   updatedAt: string | null;
+};
+
+export type ShelfRow = {
+  id: number;
+  uid: string;
+  name: string;
+  ord: number;
+  courses: CourseRow[];
 };
 
 export type SearchHit = {
@@ -36,11 +45,11 @@ export type RecentItem = {
 export function listCourses(db: DatabaseSync): CourseRow[] {
   const rows = db
     .prepare(
-      `SELECT co.id, co.slug, co.title, co.discipline, co.summary,
+      `SELECT co.id, co.slug, co.title, co.discipline, co.summary, co.shelf_id,
               (SELECT count(*) FROM chapters ch WHERE ch.course_id = co.id) AS chapters,
               (SELECT max(updated_at) FROM chapters ch WHERE ch.course_id = co.id) AS updated_at
        FROM courses co
-       ORDER BY co.discipline, co.sort_order, co.title`,
+       ORDER BY co.sort_order, co.discipline, co.title`,
     )
     .all() as any[];
 
@@ -51,8 +60,94 @@ export function listCourses(db: DatabaseSync): CourseRow[] {
     discipline: r.discipline,
     summary: r.summary ?? "",
     chapters: r.chapters,
+    shelfId: r.shelf_id ?? null,
     updatedAt: r.updated_at ?? null,
   }));
+}
+
+export function listShelves(db: DatabaseSync): ShelfRow[] {
+  const shelves = db.prepare("SELECT id, uid, name, ord FROM shelves ORDER BY ord").all() as {
+    id: number;
+    uid: string;
+    name: string;
+    ord: number;
+  }[];
+  const courses = listCourses(db);
+  return shelves.map((s) => ({
+    id: s.id,
+    uid: s.uid,
+    name: s.name,
+    ord: s.ord,
+    courses: courses.filter((c) => c.shelfId === s.id),
+  }));
+}
+
+// 建一层，放在最上面。层名只是给眼睛看的，不参与任何判断。
+export function createShelf(db: DatabaseSync, name?: string, position: "top" | "bottom" = "top") {
+  // 往上一层：接在最上面；往下一层：插在最下面（ORD 取 min-1，层号越大越靠上）。
+  const edge = position === "bottom"
+    ? (db.prepare("SELECT COALESCE(min(ord), 1) AS m FROM shelves").get() as { m: number })
+    : (db.prepare("SELECT COALESCE(max(ord), 0) AS m FROM shelves").get() as { m: number });
+  const ord = position === "bottom" ? Number(edge.m) - 1 : Number(edge.m) + 1;
+  const uid = `s${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  const total = (db.prepare("SELECT count(*) AS n FROM shelves").get() as { n: number }).n;
+  const finalName = (name ?? "").trim() || `第 ${Number(total) + 1} 层`;
+  const info = db
+    .prepare("INSERT INTO shelves (uid, name, ord, created_at) VALUES (?, ?, ?, ?)")
+    .run(uid, finalName.slice(0, 40), ord, nowIso());
+  return { id: Number(info.lastInsertRowid), uid, name: finalName, ord, courses: [] as CourseRow[] };
+}
+
+export function renameShelf(db: DatabaseSync, id: number, rawName: string) {
+  const name = rawName.trim().slice(0, 40);
+  if (!name) return { error: "层名不能为空" as const };
+  const row = db.prepare("SELECT id FROM shelves WHERE id = ?").get(id) as { id: number } | undefined;
+  if (!row) return { error: "没有这一层" as const, missing: true };
+  db.prepare("UPDATE shelves SET name = ? WHERE id = ?").run(name, id);
+  return { id, name };
+}
+
+export function deleteShelf(db: DatabaseSync, id: number) {
+  const rows = db.prepare("SELECT id, ord, name FROM shelves ORDER BY ord").all() as Array<{ id: number; ord: number; name: string }>;
+  if (rows.length <= 1) return { error: "这是最后一层，删了就什么都不剩了" as const };
+  const idx = rows.findIndex((r) => r.id === id);
+  if (idx < 0) return { error: "没有这一层" as const, missing: true };
+  const books = (db.prepare("SELECT count(*) AS n FROM courses WHERE shelf_id = ?").get(id) as { n: number }).n;
+  if (books > 0) return { error: `这一层还有 ${books} 本书，不能删` as const, notEmpty: true };
+
+  db.exec("BEGIN");
+  try {
+    db.prepare("DELETE FROM shelves WHERE id = ?").run(id);
+    // 删完把 ord 归一成 1..n，避免以后往下长层时 min(ord) 变成负数。
+    const rest = db.prepare("SELECT id FROM shelves ORDER BY ord").all() as Array<{ id: number }>;
+    db.prepare("UPDATE shelves SET ord = ord - 1000000").run();
+    rest.forEach((r, i) => db.prepare("UPDATE shelves SET ord = ? WHERE id = ?").run(i + 1, r.id));
+    db.exec("COMMIT");
+  } catch (e) {
+    db.exec("ROLLBACK");
+    throw e;
+  }
+  return { ok: true, id };
+}
+
+export function reorderShelf(db: DatabaseSync, id: number, toIndex: number) {
+  const rows = db.prepare("SELECT id, ord FROM shelves ORDER BY ord").all() as Array<{ id: number; ord: number }>;
+  const idx = rows.findIndex((r) => r.id === id);
+  if (idx < 0) return { error: "没有这一层" as const, missing: true };
+  if (!Number.isInteger(toIndex)) return { error: "位置不对" as const };
+  const list = rows.filter((r) => r.id !== id);
+  const at = Math.max(0, Math.min(list.length, toIndex));
+  list.splice(at, 0, rows[idx]);
+  db.exec("BEGIN");
+  try {
+    db.prepare("UPDATE shelves SET ord = ord - 1000000").run();
+    list.forEach((r, i) => db.prepare("UPDATE shelves SET ord = ? WHERE id = ?").run(i + 1, r.id));
+    db.exec("COMMIT");
+  } catch (e) {
+    db.exec("ROLLBACK");
+    throw e;
+  }
+  return { ok: true, id, ord: at + 1, total: list.length };
 }
 
 function cut(text: string, term: string, radius = 56): string {

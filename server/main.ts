@@ -8,10 +8,24 @@ import { dirname, extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getDb, DB_PATH, pendingMigrations } from "../src/db/index.ts";
 import { readGate, writeGate } from "../src/gate.ts";
-import { searchChapters, recentViews, listCourses, recordView, getChapter, getCourse } from "../src/query.ts";
+import {
+  searchChapters,
+  recentViews,
+  listCourses,
+  listShelves,
+  createShelf,
+  renameShelf,
+  deleteShelf,
+  reorderShelf,
+  recordView,
+  getChapter,
+  getCourse,
+} from "../src/query.ts";
+import { importChapter, ImportError } from "../src/import.ts";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const DIST = join(ROOT, "dist");
+const CONTENT = join(ROOT, "content");
 const PORT = Number(process.env.COURSE_PORT ?? 8790);
 const HOST = "127.0.0.1";
 const TOKEN_PATH = join(ROOT, ".bench", "token");
@@ -97,6 +111,35 @@ function serveStatic(pathname: string, res: any) {
   return false;
 }
 
+// 所有写操作共用：本机回环 + JSON + gate 打开。gate 就是那道开关的语义。
+function guardWrite(req: any, res: any, skipGate = false): boolean {
+  if (!isLoopback(req)) {
+    json(res, 403, { error: "仅允许本机调用" });
+    return false;
+  }
+  const origin = req.headers.origin as string | undefined;
+  const allowed = [
+    `http://127.0.0.1:${PORT}`,
+    `http://localhost:${PORT}`,
+    "http://127.0.0.1:5173",
+    "http://localhost:5173",
+  ];
+  if (origin && !allowed.includes(origin)) {
+    json(res, 403, { error: "来源不被允许" });
+    return false;
+  }
+  if (req.headers["content-type"] !== "application/json") {
+    json(res, 415, { error: "要求 application/json" });
+    return false;
+  }
+  if (skipGate) return true;
+  if (!readGate(db).on) {
+    json(res, 403, { error: "迭代模式未开启：请先在设置页打开那道开关", code: "gate-off" });
+    return false;
+  }
+  return true;
+}
+
 const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", `http://${HOST}:${PORT}`);
   const pathname = url.pathname;
@@ -151,6 +194,76 @@ const server = createServer(async (req, res) => {
       const state = recordView(db, id, Number(body.seconds ?? 0));
       if (!state) return json(res, 404, { error: "查无此章" });
       return json(res, 200, state);
+    }
+
+    if (pathname === "/api/shelves" && req.method === "GET") {
+      return json(res, 200, { items: listShelves(db) });
+    }
+
+    if (pathname === "/api/shelf" && req.method === "POST") {
+      if (!guardWrite(req, res)) return;
+      const body = await readBody(req);
+      const position = body.position === "bottom" ? "bottom" : "top";
+      const shelf = createShelf(db, body.name, position);
+      console.log(`[course] 新建层 ${shelf.ord}「${shelf.name}」`);
+      return json(res, 201, shelf);
+    }
+
+    if (pathname === "/api/shelf/rename" && req.method === "POST") {
+      if (!guardWrite(req, res)) return;
+      const body = await readBody(req);
+      const id = Number(body.id);
+      if (!Number.isInteger(id) || id <= 0) return json(res, 400, { error: "id 不对" });
+      if (typeof body.name !== "string") return json(res, 400, { error: "name 不对" });
+      const out = renameShelf(db, id, body.name);
+      if ("missing" in out) return json(res, 404, { error: out.error });
+      if ("error" in out) return json(res, 400, { error: out.error });
+      console.log(`[course] 层改名 ${id} →「${out.name}」`);
+      return json(res, 200, out);
+    }
+
+    if (pathname === "/api/shelf/delete" && req.method === "POST") {
+      if (!guardWrite(req, res, true)) return;
+      const body = await readBody(req);
+      const id = Number(body.id);
+      if (!Number.isInteger(id) || id <= 0) return json(res, 400, { error: "id 不对" });
+      const out = deleteShelf(db, id);
+      if ("missing" in out) return json(res, 404, { error: out.error });
+      if ("error" in out) return json(res, 400, { error: out.error, code: "not-empty" });
+      console.log(`[course] 删层 ${id}`);
+      return json(res, 200, out);
+    }
+
+    if (pathname === "/api/shelf/reorder" && req.method === "POST") {
+      if (!guardWrite(req, res, true)) return;
+      const body = await readBody(req);
+      const id = Number(body.id);
+      if (!Number.isInteger(id) || id <= 0) return json(res, 400, { error: "id 不对" });
+      const out = reorderShelf(db, id, Number(body.toIndex));
+      if ("missing" in out) return json(res, 404, { error: out.error });
+      if ("error" in out) return json(res, 400, { error: out.error });
+      console.log(`[course] 重排层 ${id} → 第 ${out.ord} / ${out.total} 位`);
+      return json(res, 200, out);
+    }
+
+    if (pathname === "/api/import" && req.method === "POST") {
+      if (!guardWrite(req, res)) return;
+      const body = await readBody(req);
+      try {
+        const result = importChapter(db, CONTENT, {
+          title: body.title,
+          chapterTitle: body.chapterTitle,
+          body: body.body,
+          discipline: body.discipline,
+          courseSlug: body.courseSlug ?? null,
+          shelfId: Number.isInteger(body.shelfId) ? body.shelfId : null,
+        });
+        console.log(`[course] 导入 ${result.courseSlug}/${result.chapterSlug}（${result.mode}）`);
+        return json(res, 201, result);
+      } catch (err) {
+        if (err instanceof ImportError) return json(res, err.status, { error: err.message });
+        throw err;
+      }
     }
 
     if (pathname === "/api/gate") {

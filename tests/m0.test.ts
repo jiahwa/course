@@ -31,7 +31,7 @@ function seed(db: any) {
 test("迁移把基线的表与触发器建齐，且无待应用", () => {
   const db = openDb(join(mkdtempSync(join(tmpdir(), "course-test-")), "test.db"));
   const res = migrate(db);
-  assert.equal(res.applied.length, 2, "基线 + uid 两条迁移");
+  assert.equal(res.applied.length, 3, "基线 + uid + 书架层三条迁移");
   assert.deepEqual(pendingMigrations(db), []);
 
   const tables = new Set(

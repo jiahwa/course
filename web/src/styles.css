@@ -756,6 +756,7 @@ mark {
 /* ---- 立体书架（纯 CSS 3D，零依赖） ---- */
 
 .shelf-wrap {
+  position: relative;
   margin: -6px 0 0;
 }
 
@@ -1019,3 +1020,1059 @@ mark {
     align-items: flex-start;
   }
 }
+
+/* ---- 多层书架：远景 ---- */
+
+.shelf-stage {
+  transition: height 0.5s ease;
+}
+
+.shelf-stage.far {
+  height: 480px;
+  overflow: hidden;
+}
+
+.shelf-stage.far .shelf-anchor {
+  top: 66%;
+}
+
+.tower {
+  position: relative;
+  width: 100%;
+  height: 262px;
+  transform-style: preserve-3d;
+  transform-origin: 50% 50%;
+  transition: transform 0.6s cubic-bezier(0.22, 0.69, 0.21, 1), opacity 0.4s;
+}
+
+.tower.scaled {
+  transform: scale(0.46);
+}
+
+.layer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -6px;
+  height: 262px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  transition: transform 0.6s cubic-bezier(0.22, 0.69, 0.21, 1), opacity 0.35s;
+}
+
+@font-face {
+  font-family: "Seal Script";
+  src: url("/fonts/JFZSKSealScript.woff2") format("woff2");
+  font-display: swap;
+}
+
+.layer-name {
+  position: absolute;
+  bottom: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 3;
+  display: inline-block;
+  padding: 3px 10px 4px;
+  white-space: nowrap;
+  font-family: "Seal Script", "Songti SC", serif;
+  font-size: 12px;
+  line-height: 1.15;
+  letter-spacing: 0.06em;
+  color: #f2e5cb;
+  background: linear-gradient(180deg, #543c26 0%, #46301d 42%, #382515 74%, #2b1b0f 100%);
+  border: 1px solid #b1904f;
+  border-radius: 2px;
+  box-shadow:
+    0 0 0 1px #17110c,
+    inset 0 1px 0 rgba(255, 226, 160, 0.22),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.42),
+    0 2px 5px rgba(48, 40, 26, 0.26);
+  text-shadow: 0 1px 0 rgba(38, 24, 12, 0.55), 0 0 4px rgba(242, 229, 203, 0.12);
+}
+
+.layer-name::after {
+  content: "";
+  position: absolute;
+  inset: 2px;
+  border: 1px solid rgba(177, 144, 79, 0.42);
+  border-radius: 1px;
+  pointer-events: none;
+}
+
+/* 近景只有一层，层名交给黑板/HUD，牌不压书 */
+.tower:not(.scaled) .layer-name {
+  display: none;
+}
+
+/* 远景：铭牌竖排，钉在书架左侧的挡板上 */
+.tower.scaled .layer-name {
+  bottom: 30px;
+  transform: translateX(-194px);
+  padding: 8px 6px 9px;
+  writing-mode: vertical-rl;
+  text-orientation: upright;
+  font-size: 31px;
+  line-height: 1.05;
+  letter-spacing: 0.02em;
+  border-radius: 3px;
+}
+
+.tower.scaled .layer-name::after {
+  inset: 4px;
+}
+
+/* 书架左侧挡板（只在远景出现） */
+.shelf-side {
+  display: none;
+}
+
+.tower.scaled .shelf-side {
+  display: block;
+  position: absolute;
+  left: -227px;
+  top: 0;
+  bottom: 0;
+  width: 112px;
+  border-radius: 0;
+  background:
+    repeating-linear-gradient(90deg, rgba(126, 112, 86, 0.055) 0 1px, transparent 1px 9px),
+    linear-gradient(180deg, #efe7d2 0%, #e4dabd 48%, #dccfb1 78%, #d2c5a6 100%);
+  border-left: 1px solid #c8bb9d;
+  border-right: 1px solid rgba(118, 106, 84, 0.34);
+  box-shadow:
+    7px 0 14px rgba(60, 52, 38, 0.11),
+    inset 0 1px 0 rgba(255, 252, 240, 0.66),
+    inset 0 -1px 0 rgba(120, 108, 86, 0.18);
+  z-index: 1;
+}
+
+.layer-empty {
+  width: 158px;
+  height: 158px;
+  margin-bottom: 14px;
+  border: 1px dashed var(--rule);
+  border-radius: 2px;
+  display: grid;
+  place-items: center;
+  color: var(--ink-faint);
+  font-size: 12px;
+  letter-spacing: 0.2em;
+  background: rgba(244, 240, 230, 0.5);
+}
+
+.hud-notice {
+  font-size: 12px;
+  color: var(--seal);
+  margin: 8px 0 0;
+  cursor: pointer;
+}
+
+/* ---- 老式系统弹框（XP 的骨，纸墨的皮） ---- */
+
+.xp-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(27, 25, 23, 0.24);
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  z-index: 60;
+}
+
+.xp-win {
+  width: min(430px, 100%);
+  background: var(--paper);
+  border: 1px solid #8d8677;
+  box-shadow: 3px 3px 0 rgba(27, 25, 23, 0.16), 0 22px 54px rgba(27, 25, 23, 0.2);
+}
+
+.xp-win.wide {
+  width: min(580px, 100%);
+}
+
+.xp-titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 5px 4px 10px;
+  background: linear-gradient(180deg, #4b463d 0%, #2c2822 100%);
+  border-bottom: 1px solid #1b1917;
+}
+
+.xp-title {
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  color: #f2ede0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.xp-x {
+  appearance: none;
+  flex: none;
+  width: 19px;
+  height: 17px;
+  border: 1px solid #bfb6a3;
+  background: linear-gradient(180deg, #efe8d9, #cfc5b0);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.xp-body {
+  padding: 18px 16px 12px;
+}
+
+.xp-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 8px 14px 14px;
+}
+
+.xp-btn {
+  appearance: none;
+  border: 1px solid #a89f8c;
+  background: linear-gradient(180deg, #fbf7ec, #e5dcc8);
+  box-shadow: inset 1px 1px 0 #ffffff, inset -1px -1px 0 #c9bfa9;
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--ink);
+  padding: 5px 16px;
+  cursor: pointer;
+  border-radius: 0;
+}
+
+.xp-btn:active {
+  box-shadow: inset -1px -1px 0 #ffffff, inset 1px 1px 0 #c9bfa9;
+}
+
+.xp-btn.primary {
+  border-color: #7c7563;
+  font-weight: 600;
+}
+
+.xp-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.xp-hint {
+  margin-right: auto;
+  font-size: 11px;
+  color: var(--ink-faint);
+  max-width: 46%;
+  line-height: 1.4;
+}
+
+.xp-line {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.xp-glyph {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 1px solid var(--seal);
+  color: var(--seal);
+  display: grid;
+  place-items: center;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.xp-text {
+  margin: 0 0 4px;
+  font-size: 14px;
+}
+
+.xp-sub {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ink-soft);
+  line-height: 1.6;
+}
+
+/* ---- 导入面板 ---- */
+
+.import-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 14px;
+}
+
+.imp {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--ink-soft);
+  min-width: 0;
+}
+
+.imp span {
+  letter-spacing: 0.06em;
+}
+
+.imp input,
+.imp select {
+  font-family: inherit;
+  font-size: 13px;
+  padding: 5px 7px;
+  border: 1px solid var(--rule);
+  background: #fbf7ec;
+  color: var(--ink);
+  border-radius: 0;
+  min-width: 0;
+}
+
+.imp input:focus,
+.imp select:focus,
+.imp textarea:focus {
+  outline: 1px solid #8d8677;
+  outline-offset: -1px;
+}
+
+.imp.wide-input {
+  margin-top: 12px;
+}
+
+.imp textarea {
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.75;
+  padding: 8px;
+  border: 1px solid var(--rule);
+  background: #fbf7ec;
+  resize: vertical;
+}
+
+.imp-file {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.imp-file input[type="file"] {
+  display: none;
+}
+
+.imp-tip {
+  font-size: 11px;
+  color: var(--ink-faint);
+  margin: 6px 0 0;
+}
+
+@media (max-width: 700px) {
+  .shelf-stage.far {
+    height: 360px;
+  }
+  .shelf-stage.far {
+    height: 420px;
+  }
+  .import-grid {
+    grid-template-columns: 1fr;
+  }
+  .xp-win.wide {
+    width: 100%;
+  }
+}
+
+/* ---- 空层：也是书架，只是架上没书 ---- */
+
+.shelf.ghost {
+  width: 232px;
+  min-height: 150px;
+  justify-content: flex-start;
+  align-items: flex-end;
+  cursor: pointer;
+  outline: none;
+}
+
+.shelf.ghost:focus-visible {
+  box-shadow: inset 0 0 0 1px var(--seal);
+}
+
+.book-ghost {
+  width: 52px;
+  height: 150px;
+  display: grid;
+  place-items: center;
+  border: 1px dashed var(--rule);
+  border-radius: 2px;
+  color: var(--ink-faint);
+  font-size: 12px;
+  letter-spacing: 0.18em;
+  writing-mode: vertical-rl;
+  background: rgba(244, 240, 230, 0.35);
+  transition: color 0.3s, border-color 0.3s;
+}
+
+.shelf.ghost:hover .book-ghost {
+  color: var(--seal);
+  border-color: var(--seal);
+}
+
+/* ---- 改层名的半遮罩：贴在空层侧面 ---- */
+
+.layer-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(27, 25, 23, 0.12);
+  z-index: 70;
+}
+
+.rename-card {
+  position: fixed;
+  width: 228px;
+  padding: 12px 12px 10px;
+  background: var(--paper);
+  border: 1px solid #8d8677;
+  box-shadow: 2px 2px 0 rgba(27, 25, 23, 0.12), 0 16px 34px rgba(27, 25, 23, 0.2);
+}
+
+.rename-label {
+  margin: 0 0 8px;
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  color: var(--ink-faint);
+}
+
+.rename-input {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: inherit;
+  font-size: 14px;
+  padding: 5px 7px;
+  border: 1px solid var(--rule);
+  background: #fbf7ec;
+  color: var(--ink);
+  border-radius: 0;
+}
+
+.rename-input:focus {
+  outline: 1px solid #8d8677;
+  outline-offset: -1px;
+}
+
+.rename-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+/* ---- 层被长按选中 / 拖动重排 ---- */
+
+.layer.picked {
+  outline: 1px dashed var(--seal);
+  outline-offset: 6px;
+  background: rgba(178, 56, 42, 0.04);
+}
+
+.layer.dragging {
+  transition: none;
+  z-index: 8;
+  filter: drop-shadow(0 18px 26px rgba(27, 25, 23, 0.24));
+  outline: 1px solid var(--seal);
+  cursor: grabbing;
+}
+
+.pick-card {
+  position: fixed;
+  width: 228px;
+  padding: 12px 12px 10px;
+  background: var(--paper);
+  border: 1px solid #8d8677;
+  box-shadow: 2px 2px 0 rgba(27, 25, 23, 0.12), 0 16px 34px rgba(27, 25, 23, 0.2);
+}
+
+.pick-tip {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink-soft);
+}
+
+/* ---- 拖动删层的垃圾桶：具象的学校垃圾桶（绿色翻盖 + 竖纹桶身），拖进来才亮 ---- */
+
+.shelf-trash {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  width: 64px;
+  height: 62px;
+  display: grid;
+  justify-items: center;
+  align-content: end;
+  gap: 3px;
+  padding-bottom: 0;
+  border: 0;
+  background: none;
+  color: var(--ink-faint);
+  z-index: 5;
+  transition: transform 0.2s, color 0.2s;
+}
+
+.shelf-trash.hot {
+  color: var(--seal);
+  transform: scale(1.06);
+}
+
+/* 盖子：高校常见的那种深灰翻盖，比桶沿宽一圈，上面一个小把手 */
+.trash-lid {
+  position: relative;
+  width: 54px;
+  height: 9px;
+  border-radius: 4px 4px 1px 1px;
+  background: linear-gradient(180deg, #86a881 0%, #6a8f68 48%, #4e7350 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4), 0 2px 3px rgba(46, 66, 48, 0.26);
+}
+
+.trash-lid::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: -4px;
+  transform: translateX(-50%);
+  width: 20px;
+  height: 5px;
+  border-radius: 3px 3px 0 0;
+  background: linear-gradient(180deg, #7fa07a, #5b7d5c);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+
+/* 桶身：方形不锈钢桶，竖向拉丝反光 + 两道加强筋 + 桶口缝 + 底部暗边 */
+.trash-body {
+  position: relative;
+  width: 50px;
+  height: 50px;
+  clip-path: polygon(3% 0, 97% 0, 93% 100%, 7% 100%);
+  border-radius: 3px 3px 5px 5px;
+  background:
+    linear-gradient(180deg, rgba(18, 34, 20, 0.46) 0 6px, rgba(18, 34, 20, 0) 6px),
+    linear-gradient(180deg, transparent 0 27px, rgba(255, 255, 255, 0.13) 27px 28px, transparent 28px),
+    linear-gradient(90deg, #4a7450 0%, #6d9770 22%, #58855c 54%, #406244 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), inset 0 -4px 0 rgba(32, 52, 35, 0.34),
+    inset 4px 0 6px rgba(255, 255, 255, 0.1), inset -5px 0 9px rgba(28, 46, 31, 0.28),
+    0 2px 4px rgba(60, 80, 60, 0.22);
+}
+
+/* 桶身上的分类小牌：一块淡绿的方牌 + 一道白边 */
+.trash-body::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 11px;
+  transform: translateX(-50%);
+  left: 8%;
+  right: 8%;
+  transform: none;
+  bottom: 9px;
+  height: 2px;
+  border-radius: 0;
+  background: rgba(26, 44, 28, 0.3);
+  box-shadow: 0 -1px 0 rgba(255, 255, 255, 0.12);
+}
+
+.trash-label {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 2px);
+  transform: translateX(-50%);
+  white-space: nowrap;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: #6f7c6f;
+  background: rgba(251, 247, 236, 0.96);
+  border: 1px solid rgba(120, 110, 88, 0.26);
+  box-shadow: 0 2px 6px rgba(70, 64, 52, 0.14);
+  pointer-events: none;
+}
+
+.shelf-trash.hot .trash-label {
+  color: #8c4331;
+  border-color: rgba(140, 67, 49, 0.4);
+}
+
+.shelf-trash.blocked .trash-label {
+  color: #6d6858;
+}
+
+.trash-hint {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--seal);
+  text-align: center;
+}
+
+.layer-mask,
+.rename-card,
+.pick-card,
+.pick-tip {
+  /* 旧选中卡片已停用：选择与删除改成拖拽，不弹卡 */
+}
+
+/* 拖到桶上：整只桶转砖红 */
+.shelf-trash.hot .trash-lid {
+  background: linear-gradient(180deg, #dda79a 0%, #bd8071 48%, #a2655a 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4), 0 2px 3px rgba(130, 62, 48, 0.28);
+}
+
+.shelf-trash.hot .trash-lid::after {
+  background: linear-gradient(180deg, #e6b3a6, #c18576);
+}
+
+.shelf-trash.hot .trash-body {
+  background:
+    linear-gradient(180deg, rgba(90, 40, 30, 0.26) 0 4px, rgba(90, 40, 30, 0) 4px),
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.1) 0 1px, transparent 1px 9px),
+    linear-gradient(90deg, #b3705f 0%, #d69a89 20%, #c3836f 52%, #a06555 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), inset 0 -4px 0 rgba(100, 46, 34, 0.34),
+    inset 4px 0 6px rgba(255, 255, 255, 0.1), inset -5px 0 9px rgba(90, 40, 30, 0.28),
+    0 2px 4px rgba(120, 58, 44, 0.24);
+}
+
+.shelf-trash.hot .trash-body::after {
+  background: rgba(96, 40, 30, 0.3);
+}
+
+.shelf-trash.blocked .trash-body::after {
+  background: rgba(56, 54, 46, 0.28);
+}
+
+/* 层里有书：桶变灰，不能删 */
+.shelf-trash.blocked {
+  color: #7c7563;
+}
+
+.shelf-trash.blocked .trash-lid {
+  background: linear-gradient(180deg, #b6b2a5 0%, #9a968a 48%, #817d71 100%);
+}
+
+.shelf-trash.blocked .trash-lid::after {
+  background: linear-gradient(180deg, #c3bfb2, #a29e91);
+}
+
+.shelf-trash.blocked .trash-body {
+  background:
+    linear-gradient(180deg, rgba(66, 64, 54, 0.24) 0 4px, rgba(66, 64, 54, 0) 4px),
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.08) 0 1px, transparent 1px 9px),
+    linear-gradient(90deg, #9c9789 0%, #b9b4a5 20%, #a6a192 52%, #8d887a 100%);
+}
+
+/* ---- 书架黑板：常驻，替掉所有弹框 ---- */
+
+.shelf-board {
+  position: relative;
+  margin: 2px 0 16px;
+  padding: 16px 22px 22px;
+  border-radius: 4px;
+  background:
+    radial-gradient(70% 50% at 22% 28%, rgba(255, 255, 255, 0.045), transparent 72%),
+    radial-gradient(60% 45% at 78% 68%, rgba(255, 255, 255, 0.035), transparent 72%),
+    linear-gradient(160deg, #24322b 0%, #1d2924 58%, #22302a 100%);
+  box-shadow:
+    0 0 0 1px #17120f,
+    inset 0 0 0 7px #d9cbaa,
+    inset 0 0 0 8px #948468,
+    inset 0 0 0 11px #cdbf9f,
+    inset 0 0 0 12px #6f6250,
+    0 12px 24px rgba(27, 25, 23, 0.18);
+  color: #e8e3d1;
+  overflow: hidden;
+  transition: padding 0.3s ease;
+}
+
+.board-face {
+  position: relative;
+  z-index: 2;
+}
+
+.board-tray {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 9px;
+  background: linear-gradient(180deg, #ece5d6, #cbc1ab);
+  border-top: 1px solid #9d937d;
+  z-index: 3;
+}
+
+.board-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+.board-title {
+  font-size: 16px;
+  letter-spacing: 0.18em;
+  color: #f4f0de;
+}
+
+.board-sub {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: #b9b5a0;
+}
+
+.board-line {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.78;
+  letter-spacing: 0.02em;
+  color: #e2ddca;
+  max-width: 58ch;
+}
+
+.board-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.board-actions .board-sub {
+  margin-right: auto;
+}
+
+.board-btn {
+  appearance: none;
+  border: 1px solid rgba(244, 240, 222, 0.55);
+  background: transparent;
+  color: #f4f0de;
+  font-family: inherit;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  padding: 5px 16px;
+  border-radius: 2px;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.board-btn:hover {
+  background: rgba(244, 240, 222, 0.12);
+  border-color: rgba(244, 240, 222, 0.8);
+}
+
+.board-btn.solid {
+  background: #ece5d6;
+  border-color: #ece5d6;
+  color: #28322c;
+}
+
+.board-btn.solid:hover {
+  background: #f6f1e2;
+}
+
+.board-btn:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+/* 黑板里的表单：输入仍是纸色，标签改成粉笔色 */
+
+.shelf-board .imp span,
+.shelf-board .imp.wide-input span {
+  color: #cfcab6;
+}
+
+.shelf-board .imp input,
+.shelf-board .imp select {
+  background: #f4efe0;
+  border-color: #8d8677;
+  color: #1b1917;
+}
+
+.shelf-board .imp input::placeholder {
+  color: #9a927f;
+}
+
+.shelf-board .board-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.75;
+  padding: 8px;
+  border: 1px solid #8d8677;
+  background: #f4efe0;
+  color: #1b1917;
+  resize: vertical;
+  border-radius: 0;
+}
+
+.shelf-board .board-textarea::placeholder {
+  color: #9a927f;
+}
+
+.shelf-board .import-grid.board-grid {
+  margin-top: 10px;
+}
+
+/* ---- 拖动残影 / 落位槽 / 固定垃圾桶 ---- */
+
+.layer-echo {
+  position: fixed;
+  pointer-events: none;
+  z-index: 6;
+  border: 1px dashed rgba(178, 56, 42, 0.55);
+  background: rgba(244, 240, 230, 0.3);
+}
+
+.echo-name {
+  position: absolute;
+  top: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 11px;
+  letter-spacing: 0.24em;
+  color: var(--seal);
+  opacity: 0.8;
+  white-space: nowrap;
+}
+
+.drop-slot {
+  position: fixed;
+  height: 0;
+  pointer-events: none;
+  z-index: 9;
+  border-top: 2px solid var(--seal);
+  box-shadow: 0 1px 0 rgba(244, 240, 230, 0.8);
+}
+
+.drop-label {
+  position: absolute;
+  right: 0;
+  top: -21px;
+  padding: 1px 7px;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  color: var(--seal);
+  background: rgba(244, 240, 230, 0.94);
+  border: 1px solid rgba(178, 56, 42, 0.35);
+  white-space: nowrap;
+}
+
+/* 垃圾桶钉在书架舞台右侧，底边与书架底部/柱子底部那条线齐平，整体落在连线之上 */
+/* 桶下的一小段木台 + 投在台下的影子：台面托住桶，台身落地 */
+.shelf-trash .trash-sill,
+.shelf-trash .trash-ground,
+.shelf-trash .trash-shadow {
+  position: absolute;
+  pointer-events: none;
+}
+
+/* 台面：桶正好坐在这块浅木色上 */
+.shelf-trash .trash-sill {
+  left: -9px;
+  bottom: -4px;
+  width: 76px;
+  height: 4px;
+  z-index: 0;
+  border-radius: 2px 2px 1px 1px;
+  background: linear-gradient(180deg, #fbf7ec 0%, #ece5d3 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72), inset 0 -2px 2px rgba(118, 100, 70, 0.28);
+}
+
+/* 台身：一段带木纹的矮台，比台面深一档 */
+.shelf-trash .trash-ground {
+  left: -9px;
+  bottom: -10px;
+  width: 76px;
+  height: 6px;
+  z-index: 0;
+  border-radius: 1px 1px 2px 2px;
+  background:
+    repeating-linear-gradient(180deg, rgba(120, 110, 88, 0.11) 0 1px, transparent 1px 3px),
+    linear-gradient(180deg, #ded7c3 0%, #cdc5ad 58%, #b0a88f 100%);
+  box-shadow: 0 2px 3px rgba(96, 88, 66, 0.22);
+}
+
+/* 影子：落在台子下方偏右的一团 */
+.shelf-trash .trash-shadow {
+  left: -3px;
+  bottom: -16px;
+  width: 80px;
+  height: 12px;
+  z-index: -1;
+  border-radius: 50%;
+  background: radial-gradient(ellipse at 54% 32%, rgba(70, 64, 52, 0.34) 0%, rgba(70, 64, 52, 0.14) 46%, rgba(70, 64, 52, 0) 76%);
+  filter: blur(1.4px);
+}
+
+.shelf-trash.hot .trash-sill {
+  background: linear-gradient(180deg, #f6e6dd 0%, #e6ccbe 100%);
+}
+
+.shelf-trash.hot .trash-ground {
+  background:
+    repeating-linear-gradient(180deg, rgba(120, 70, 50, 0.13) 0 1px, transparent 1px 3px),
+    linear-gradient(180deg, #e0b9aa 0%, #cba495 58%, #a47f6d 100%);
+}
+
+.shelf-wrap .shelf-trash {
+  position: absolute;
+  right: 44px;
+  left: auto;
+  bottom: auto;
+  top: 186px;
+  width: 64px;
+  height: 62px;
+  z-index: 6;
+}
+
+.shelf-wrap.far .shelf-trash {
+  top: 314px;
+}
+
+/* ---- 远景左侧竹竿：分节 = 层数，节内是该层书架的模糊缩略图 ---- */
+
+.bamboo {
+  position: absolute;
+  left: 46px;
+  bottom: 100px;
+  display: flex;
+  align-items: flex-end;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.bamboo-stalk {
+  position: relative;
+  display: flex;
+  flex-direction: column-reverse;
+  width: 34px;
+  filter: drop-shadow(0 6px 12px rgba(126, 158, 132, 0.2));
+}
+
+.bamboo-node {
+  position: relative;
+  width: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.22) 0 1px, rgba(255, 255, 255, 0) 1px 7px),
+    linear-gradient(90deg, #9dc8a4 0%, #c2dfc2 22%, #dcf0d9 46%, #b7d7b5 74%, #93bb9a 100%);
+  border-bottom: 2px solid rgba(255, 255, 255, 0.9);
+  border-top: 1px solid rgba(108, 148, 115, 0.4);
+  border-radius: 7px 5px 5px 7px;
+  box-shadow:
+    inset 0 -4px 0 rgba(108, 148, 115, 0.22),
+    inset 0 5px 8px rgba(255, 255, 255, 0.5);
+  opacity: 0.68;
+  transition: opacity 0.3s, background 0.3s, box-shadow 0.3s;
+}
+
+.bamboo-node.on {
+  opacity: 1;
+  background:
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.3) 0 1px, rgba(255, 255, 255, 0) 1px 7px),
+    linear-gradient(90deg, #b0d8b3 0%, #d6ecd4 22%, #eef8ea 46%, #cae4c6 74%, #a4c9a6 100%);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.95),
+    inset 0 -4px 0 rgba(108, 148, 115, 0.2),
+    inset 0 5px 8px rgba(255, 255, 255, 0.65),
+    0 0 0 1px rgba(124, 166, 130, 0.55),
+    0 8px 16px rgba(126, 158, 132, 0.16);
+}
+
+.bn-shelf {
+  position: relative;
+  width: 26px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 3px;
+  padding-bottom: 6px;
+  filter: blur(1.1px);
+  opacity: 0.75;
+}
+
+.bamboo-node.on .bn-shelf {
+  filter: none;
+  opacity: 1;
+}
+
+.bn-book {
+  display: block;
+  width: 6px;
+  border-radius: 1px 1px 0 0;
+  background: linear-gradient(180deg, #fdfaf1, #e6ead9);
+  border: 1px solid rgba(146, 182, 152, 0.38);
+  box-shadow: 1px 0 0 rgba(146, 182, 152, 0.18);
+}
+
+.bn-board {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 1px;
+  height: 3px;
+  background: linear-gradient(180deg, #f4f0e4, #d9d6c4);
+  border-top: 1px solid rgba(146, 182, 152, 0.42);
+}
+
+.bn-empty {
+  position: absolute;
+  bottom: 8px;
+  width: 18px;
+  height: 6px;
+  border: 1px dashed rgba(133, 168, 138, 0.55);
+  border-radius: 1px;
+}
+
+/* 主干周围长出的几根小竹：SVG 小写意，压在主干下层 */
+
+.bamboo-sprigs {
+  position: absolute;
+  left: -32px;
+  bottom: 0;
+  width: 214px;
+  height: 374px;
+  pointer-events: none;
+  z-index: 0;
+  filter: blur(0.5px);
+  opacity: 0.88;
+}
+
+.bamboo-stalk {
+  z-index: 1;
+}
+
+/* 竹梢：最顶上一小截收窄 */
+
+.bamboo-stalk::after {
+  content: "";
+  position: absolute;
+  top: -9px;
+  left: 3px;
+  width: 28px;
+  height: 11px;
+  border-radius: 50% 50% 6px 6px;
+  background: linear-gradient(90deg, #b9d8b8, #e6f3e2, #c6e0c4);
+  box-shadow: inset 0 2px 3px rgba(255, 255, 255, 0.6);
+  opacity: 0.8;
+}
+

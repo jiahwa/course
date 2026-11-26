@@ -93,6 +93,26 @@ curl /api/course?slug=ai-intro   3 章，字数 163/148/135
 
 **M3 语义检索（TODO）**：先定边界——不做向量库、不引 embedding 服务；只留 `/api/ask` 的位置与 skills 说明，实现前先出方案。
 
+## 书架远景与导入（M3，2026-11-25）
+
+在双排版上又加了两层：书架塔 + 加书。
+
+- **迁移 `0003_shelves.sql`**：`shelves(id, uid, name, ord UNIQUE, created_at)`，`courses.shelf_id` 外键；插入初始三层，现有课程落第 1 层。
+- **层**：`GET /api/shelves` 一次返回所有层与层内的课；`POST /api/shelf {name?, position:"top"|"bottom"}` 建层，top 取 max(ord)+1、bottom 取 min(ord)-1。
+- **竹竿**：远景左侧的分节柱，`bamboo-node` 数量跟层数走，每节内是该层的迷你书架（书脊数=课程数，空层画虚线框），当前层 `.on` 清晰、其余 `blur(1.1px)` 半透明；`pointer-events:none`，纯展示；主干周围另生几根 SVG 小竹（`.bamboo-sprigs`，5 根细枝 + 4 组竹叶，压在主干下层），旧三片 `.bamboo-leaf` 已删。
+- **远景拖拽**：长按 520ms 直接进拖拽（无选中卡片），拖动时原位留虚线残影、目标位画红色落位槽并标「放到第 N / M 位」、垃圾桶钉在 `.shelf-wrap` 内、书架右缘且桶底与书架底线重合（`measureTrash()` 长按瞬间实测：远景取柱子底 ±16px 内最靠下的隔板底边）；桶是具象的校园绿色翻盖垃圾桶（`.trash-lid` 54×9 绿盖 + 提手、`.trash-body` 50×50 略收口桶身：桶口深槽 + 一道加强环 + 分模线，`.hot` 转砖红、`.blocked` 转灰；不再有「删层」文字），桶下是一小段木台（`.trash-sill` 台面 + `.trash-ground` 横纹台身，与书架隔板同色系），台下用 `.trash-shadow` 画一团影子；桶放页面右侧 `right:44`，与左侧柱子 `left:46` 对称；松手在别层 = `reorder`，在桶里 = 删空层。这两个接口跳过 gate（`guardWrite(..., true)`），自己摆架不需要迭代开关。
+- **远景**：近景只渲染当前层；「退出」两段式——第一次只复位（`armed`），第二次才拉远，**不建层**；远景里 `↑/↓` 切层，越界才建层，且这一端已经有一层空着时不再增长，改在书架黑板点名是哪一层；**书架模式没有弹框**，全部提示都写在书架顶端常驻的黑板 `.shelf-board` 上（含空层提示、越界拦截、导入表单）；板面文案走口语短句（「上面那层还空着」「放一本书」「行」），不用公文体，板上不放删除按钮；远景里书只能选中，必须按「进入」才开课。
+- **拼音 slug**：`src/pinyin.ts` + `src/pinyin.table.ts`（一次性从 pinyin-pro 生成的 GB2312 6763 字表，运行时零依赖，多音字取默认读音）。国富论→`guofulun`，AI 导论→`ai-dao-lun`。
+- **导入**：`src/import.ts` 的 `importChapter` 写 md → 全量 `syncContent` → 回填 `shelf_id`；`ImportError` 带 400/404/409/413。通道只有「粘贴正文」和「本地 md/txt」，不抓网页。
+- **写闸**：`guardWrite()` 统一守 `/api/shelf` 与 `/api/import`：回环 + JSON + Origin 白名单 + `bench.gate` 开。gate off 时 403 `gate-off`。
+- **验收**：32 条测试全绿；`bench verify` PASS（4 份说明书）；浏览器实测进远景 → 三层可见 → 切空层时黑板提示 → 板上「加入书籍」展开表单 → 从粘贴正文导入一本 → 书落在当前层，HUD 显示「1 章 · 学科 · 更新时间」。
+- **空层即是书架**：空层渲染成 `.shelf.ghost`——一块隔板 + 第一本书位置上的「（空）」占位，整块可点；点它在该层右侧贴一张半遮罩的改名卡片，保存走 `POST /api/shelf/rename`（`renameShelf` 只改 name，不动 ord）。
+- **说明书**：`30-layout.md` 加「多层与远景」一节；新增 `40-import.md`；`00-charter.md` covers 补 `schema:shelves`、`api:/api/shelves`、`api:/api/shelf`、`api:/api/import`、`ui:layers`、`ui:import`。
+
+**层可以长按拖动、拖进垃圾桶就删（2026-11-25 追加）**：远景里长按层 520ms 直接进拖拽态（不弹任何卡片/确认框），书架右缘、书架底线之上浮出垃圾桶；拖到别层松手 = `POST /api/shelf/reorder`（`fromIdx + round(-dy/rowVis)`），拖进垃圾桶松手 = `POST /api/shelf/delete`——**只删空层**，层里有书返回 400 `not-empty`，前端把桶标灰、写「有书不能删」并给提示；空层删掉后 ord 归一，只剩一层时也拒绝。两个接口都过 `guardWrite`。
+
+已知遗留：层删除只做「并入邻层」，没有「把书挑出来单独搬」的能力；拖动重排是整层换位置，不能只换层名顺序。
+
 ## 纪律
 
 一次只改一件事；先 md 后代码；不过 verify 不落地；被否的方案不换名重做。
