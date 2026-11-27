@@ -1,5 +1,5 @@
 // 站点服务：静态分发 + 只读为主的小 API。所有读写都从这里走，前端不碰库。
-// 迭代模块只有一个触点：/api/gate，除此之外没有任何 /bench 路径。
+// 设置页两个触点：/api/readonly（只读模式，管写操作）与 /api/gate（AI 迭代模式，游离，二期用）。
 
 import { createServer } from "node:http";
 import { existsSync, statSync, writeFileSync, mkdirSync, readFileSync } from "node:fs";
@@ -7,7 +7,7 @@ import { randomBytes } from "node:crypto";
 import { dirname, extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getDb, DB_PATH, pendingMigrations } from "../src/db/index.ts";
-import { readGate, writeGate } from "../src/gate.ts";
+import { readGate, writeGate, readReadonly, writeReadonly } from "../src/gate.ts";
 import {
   searchChapters,
   recentViews,
@@ -17,11 +17,20 @@ import {
   renameShelf,
   deleteShelf,
   reorderShelf,
+  reorderCourse,
   recordView,
   getChapter,
   getCourse,
 } from "../src/query.ts";
-import { importChapter, ImportError } from "../src/import.ts";
+import {
+  importChapter,
+  saveChapterBody,
+  deleteCourse,
+  deleteChapter,
+  listTrash,
+  restoreTrashCourse,
+  ImportError,
+} from "../src/import.ts";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const DIST = join(ROOT, "dist");
@@ -111,7 +120,53 @@ function serveStatic(pathname: string, res: any) {
   return false;
 }
 
-// 所有写操作共用：本机回环 + JSON + gate 打开。gate 就是那道开关的语义。
+// 设置页的开关端点：GET 读状态，POST 只收 { on: boolean }。两道开关共用这一套校验。
+async function switchApi(
+  req: any,
+  res: any,
+  read: () => { on: boolean; updatedAt: string | null },
+  write: (on: boolean, actor?: string) => { on: boolean; updatedAt: string | null },
+  label: string,
+): Promise<void> {
+  if (req.method === "GET") {
+    json(res, 200, read());
+    return;
+  }
+  if (req.method === "POST") {
+    if (!isLoopback(req)) {
+      json(res, 403, { error: "仅允许本机调用" });
+      return;
+    }
+    const origin = req.headers.origin;
+    const allowed = [
+      `http://127.0.0.1:${PORT}`,
+      `http://localhost:${PORT}`,
+      "http://127.0.0.1:5173",
+      "http://localhost:5173",
+    ];
+    if (origin && !allowed.includes(origin)) {
+      json(res, 403, { error: "来源不被允许" });
+      return;
+    }
+    if (req.headers["content-type"] !== "application/json") {
+      json(res, 415, { error: "要求 application/json" });
+      return;
+    }
+    const body = await readBody(req);
+    if (typeof body.on !== "boolean") {
+      json(res, 400, { error: "on 必须是布尔值" });
+      return;
+    }
+    const state = write(body.on, "web");
+    console.log(`[course] ${label} -> ${state.on ? "on" : "off"} (web)`);
+    json(res, 200, state);
+    return;
+  }
+  json(res, 405, { error: "method not allowed" });
+}
+
+// 所有写操作共用：本机回环 + JSON + 只读模式关着。
+// skipGate 表示「这条路由不受只读模式约束」——换序与三类删除走这条：删除靠黑板二次确认，不靠开关。
 function guardWrite(req: any, res: any, skipGate = false): boolean {
   if (!isLoopback(req)) {
     json(res, 403, { error: "仅允许本机调用" });
@@ -133,8 +188,8 @@ function guardWrite(req: any, res: any, skipGate = false): boolean {
     return false;
   }
   if (skipGate) return true;
-  if (!readGate(db).on) {
-    json(res, 403, { error: "迭代模式未开启：请先在设置页打开那道开关", code: "gate-off" });
+  if (readReadonly(db).on) {
+    json(res, 403, { error: "只读模式开着：请先去设置页关掉它", code: "readonly-on" });
     return false;
   }
   return true;
@@ -246,6 +301,75 @@ const server = createServer(async (req, res) => {
       return json(res, 200, out);
     }
 
+    if (pathname === "/api/course/reorder" && req.method === "POST") {
+      if (!guardWrite(req, res, true)) return;
+      const body = await readBody(req);
+      const id = Number(body.id);
+      if (!Number.isInteger(id) || id <= 0) return json(res, 400, { error: "id 不对" });
+      const out = reorderCourse(db, id, Number(body.toIndex));
+      if ("missing" in out) return json(res, 404, { error: out.error });
+      if ("error" in out) return json(res, 400, { error: out.error });
+      console.log(`[course] 换书序 ${id} → 第 ${out.index} / ${out.total} 本`);
+      return json(res, 200, out);
+    }
+
+    if (pathname === "/api/chapter/save" && req.method === "POST") {
+      if (!guardWrite(req, res)) return;
+      const body = await readBody(req);
+      try {
+        const result = saveChapterBody(db, CONTENT, body);
+        console.log(`[course] 改正文 ${result.course}/${result.slug}（${result.words} 字）`);
+        return json(res, 200, result);
+      } catch (err) {
+        if (err instanceof ImportError) return json(res, err.status, { error: err.message });
+        throw err;
+      }
+    }
+
+    if (pathname === "/api/course/delete" && req.method === "POST") {
+      if (!guardWrite(req, res, true)) return;
+      const body = await readBody(req);
+      try {
+        const out = deleteCourse(db, CONTENT, body.id);
+        console.log(`[course] 移出书架《${out.title}》(${out.slug}) → ${out.trash ?? "（无 md）"}`);
+        return json(res, 200, out);
+      } catch (err) {
+        if (err instanceof ImportError) return json(res, err.status, { error: err.message });
+        throw err;
+      }
+    }
+
+    if (pathname === "/api/chapter/delete" && req.method === "POST") {
+      if (!guardWrite(req, res, true)) return;
+      const body = await readBody(req);
+      try {
+        const out = deleteChapter(db, CONTENT, body);
+        console.log(`[course] 删章 ${out.course}/${out.slug} → ${out.trash ?? "（无 md）"}`);
+        return json(res, 200, out);
+      } catch (err) {
+        if (err instanceof ImportError) return json(res, err.status, { error: err.message });
+        throw err;
+      }
+    }
+
+    if (pathname === "/api/trash" && req.method === "GET") {
+      return json(res, 200, { items: listTrash(CONTENT) });
+    }
+
+    if (pathname === "/api/trash/restore" && req.method === "POST") {
+      // 还原是写操作，受只读模式管——它会把文件搬回 content 并入库。
+      if (!guardWrite(req, res)) return;
+      const body = await readBody(req);
+      try {
+        const out = restoreTrashCourse(db, CONTENT, body.name);
+        console.log(`[course] 还原《${out.title}》(${out.slug}) → 第 ${out.index} 本`);
+        return json(res, 200, out);
+      } catch (err) {
+        if (err instanceof ImportError) return json(res, err.status, { error: err.message });
+        throw err;
+      }
+    }
+
     if (pathname === "/api/import" && req.method === "POST") {
       if (!guardWrite(req, res)) return;
       const body = await readBody(req);
@@ -267,31 +391,11 @@ const server = createServer(async (req, res) => {
     }
 
     if (pathname === "/api/gate") {
-      if (req.method === "GET") return json(res, 200, readGate(db));
+      return switchApi(req, res, () => readGate(db), (on, actor) => writeGate(db, on, actor), "gate");
+    }
 
-      if (req.method === "POST") {
-        if (!isLoopback(req)) return json(res, 403, { error: "仅允许本机调用" });
-        const origin = req.headers.origin;
-        const allowed = [
-          `http://127.0.0.1:${PORT}`,
-          `http://localhost:${PORT}`,
-          "http://127.0.0.1:5173",
-          "http://localhost:5173",
-        ];
-        if (origin && !allowed.includes(origin)) {
-          return json(res, 403, { error: "来源不被允许" });
-        }
-        if (req.headers["content-type"] !== "application/json") {
-          return json(res, 415, { error: "要求 application/json" });
-        }
-        const body = await readBody(req);
-        if (typeof body.on !== "boolean") return json(res, 400, { error: "on 必须是布尔值" });
-        const state = writeGate(db, body.on, "web");
-        console.log(`[course] gate -> ${state.on ? "on" : "off"} (web)`);
-        return json(res, 200, state);
-      }
-
-      return json(res, 405, { error: "method not allowed" });
+    if (pathname === "/api/readonly") {
+      return switchApi(req, res, () => readReadonly(db), (on, actor) => writeReadonly(db, on, actor), "readonly");
     }
 
     if (pathname.startsWith("/api/")) return json(res, 404, { error: "no such api" });

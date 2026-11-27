@@ -4,6 +4,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
+import "./bookDrag.css";
+import { createBookDrag, type BookBox, type BookDragView } from "./bookDrag.ts";
 
 type Tab = "courses" | "search" | "recent" | "settings";
 type View = { kind: "list" } | { kind: "course"; slug: string } | { kind: "chapter"; course: string; slug: string };
@@ -45,29 +47,29 @@ type RecentItem = {
 const day = (iso: string | null) =>
   iso ? new Date(iso).toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" }) : "—";
 
-function useGate() {
-  const [gate, setGate] = useState<Gate | null>(null);
+function useSwitch(path: string) {
+  const [state, setState] = useState<Gate | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch("/api/gate")
+    fetch(path)
       .then((r) => r.json())
-      .then(setGate)
-      .catch(() => setError("读不到授权状态"));
-  }, []);
+      .then(setState)
+      .catch(() => setError("读不到开关状态"));
+  }, [path]);
 
   async function toggle(next: boolean) {
     setBusy(true);
     setError(null);
     try {
-      const r = await fetch("/api/gate", {
+      const r = await fetch(path, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ on: next }),
       });
       if (!r.ok) throw new Error((await r.json()).error ?? `HTTP ${r.status}`);
-      setGate(await r.json());
+      setState(await r.json());
     } catch (e) {
       setError(e instanceof Error ? e.message : "切换失败");
     } finally {
@@ -75,21 +77,20 @@ function useGate() {
     }
   }
 
-  return { gate, busy, error, toggle };
+  return { state, busy, error, toggle };
 }
 
 function Header({
   tab,
   setTab,
-  gate,
+  writable,
   onSearch,
 }: {
   tab: Tab;
   setTab: (t: Tab) => void;
-  gate: Gate | null;
+  writable: boolean;
   onSearch: (q: string) => void;
 }) {
-  const on = gate?.on === true;
   const [q, setQ] = useState("");
 
   function submit(e: React.FormEvent) {
@@ -118,7 +119,7 @@ function Header({
             {label}
           </button>
         ))}
-        <span className={on ? "lamp on" : "lamp"} title={on ? "迭代模式已授权" : "迭代模式未授权"} />
+        <span className={writable ? "lamp on" : "lamp"} title={writable ? "可以改（只读模式关着）" : "只读模式开着：只能看"} />
       </nav>
 
       <form className="quick" onSubmit={submit}>
@@ -229,14 +230,26 @@ function Cards({ items, onOpen }: { items: Course[]; onOpen: (slug: string) => v
   );
 }
 
+type TrashItem = {
+  name: string;
+  kind: "course" | "chapter";
+  slug: string;
+  title: string;
+  courseSlug?: string;
+  deletedAt: string;
+  chapters: number;
+};
+
 function ImportDialog({
   layer,
   layers,
+  writable,
   onClose,
   onDone,
 }: {
   layer: ShelfLayer;
   layers: ShelfLayer[];
+  writable: boolean;
   onClose: () => void;
   onDone: () => Promise<void> | void;
 }) {
@@ -244,14 +257,34 @@ function ImportDialog({
   const [chapterTitle, setChapterTitle] = useState("");
   const [chapterTouched, setChapterTouched] = useState(false);
   const [discipline, setDiscipline] = useState("");
-  const [courseSlug, setCourseSlug] = useState("");
+  const [attachSlug, setAttachSlug] = useState("");
   const [body, setBody] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // 回收站视图：从 .trash 里挑一本放回第一层最后一本
+  const [trashOpen, setTrashOpen] = useState(false);
+  const [trash, setTrash] = useState<TrashItem[] | null>(null);
+  const [trashBusy, setTrashBusy] = useState<string | null>(null);
+  const [trashNote, setTrashNote] = useState<string | null>(null);
+  const [trashError, setTrashError] = useState<string | null>(null);
+
+  const attach = attachSlug !== "";
+
   useEffect(() => {
-    if (!chapterTouched) setChapterTitle(title);
-  }, [title, chapterTouched]);
+    if (!chapterTouched && !attach) setChapterTitle(title);
+  }, [title, chapterTouched, attach]);
+
+  useEffect(() => {
+    if (!trashOpen || trash) return;
+    fetch("/api/trash")
+      .then((r) => r.json())
+      .then((d: { items?: TrashItem[] }) => setTrash(d.items ?? []))
+      .catch(() => {
+        setTrash([]);
+        setTrashError("读不到回收站。");
+      });
+  }, [trashOpen, trash]);
 
   async function pickFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -263,23 +296,24 @@ function ImportDialog({
     }
     const text = await file.text();
     setBody(text);
-    if (!title) setTitle(file.name.replace(/\.(md|markdown|txt)$/i, ""));
+    if (!title && !attach) setTitle(file.name.replace(/\.(md|markdown|txt)$/i, ""));
   }
 
   async function submit() {
     if (busy) return;
     setBusy(true);
     setError(null);
+    const picked = attach ? layers.flatMap((l) => l.courses).find((c) => c.slug === attachSlug) : null;
     try {
       const r = await fetch("/api/import", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          title,
+          title: attach ? picked?.title ?? chapterTitle : title,
           chapterTitle,
           discipline,
           body,
-          courseSlug: courseSlug || null,
+          courseSlug: attachSlug || null,
           shelfId: layer.id,
         }),
       });
@@ -296,23 +330,153 @@ function ImportDialog({
     }
   }
 
+  async function restore(item: TrashItem) {
+    if (trashBusy) return;
+    setTrashBusy(item.name);
+    setTrashError(null);
+    setTrashNote(null);
+    try {
+      const r = await fetch("/api/trash/restore", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: item.name }),
+      });
+      const data = (await r.json().catch(() => ({}))) as { error?: string; title?: string; index?: number };
+      if (!r.ok) {
+        setTrashError(data.error ?? `还原失败（${r.status}）`);
+        return;
+      }
+      setTrashNote(`已放回《${data.title}》，在第 ${data.index} 本的位置。`);
+      setTrash(null);
+      setTrashBusy(null);
+      window.setTimeout(() => void onDone(), 1200);
+    } catch {
+      setTrashError("请求没发出去，服务还在跑吗？");
+      setTrashBusy(null);
+    }
+  }
+
   const allCourses = layers.flatMap((l) => l.courses);
+  const canSubmit =
+    body.trim().length > 0 && (attach ? attachSlug !== "" && chapterTitle.trim() !== "" : title.trim() !== "");
+
+  if (trashOpen) {
+    return (
+      <>
+        <div className="board-head">
+          <span className="board-title">从回收站取回</span>
+          <span className="board-sub">
+            {trashNote ?? trashError ?? "放回去的书写在「第 1 层」最后一本后面；浏览次数不保留。"}
+          </span>
+        </div>
+
+        <div className="trash-pick">
+          {trash === null ? (
+            <p className="board-line">读取中…</p>
+          ) : trash.length === 0 ? (
+            <p className="board-line">回收站是空的。删掉的书会先躺在这儿。</p>
+          ) : (
+            <ul className="trash-list">
+              {trash.map((t) => (
+                <li key={t.name} className="trash-row">
+                  <span className="trash-title">{t.title}</span>
+                  <span className="trash-meta">
+                    {t.chapters} 章
+                    {t.deletedAt
+                      ? ` · ${new Date(t.deletedAt).toLocaleString("zh-CN", {
+                          month: "numeric",
+                          day: "numeric",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}`
+                      : ""}
+                  </span>
+                  <button
+                    type="button"
+                    className="board-btn"
+                    disabled={!writable || trashBusy !== null || trashNote !== null}
+                    onClick={() => void restore(t)}
+                    title={writable ? "放回第 1 层最后一本" : "只读模式开着，先去设置页关掉它"}
+                  >
+                    {trashBusy === t.name ? "放回中…" : "放回"}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        <div className="board-actions">
+          <button type="button" className="board-btn" onClick={() => setTrashOpen(false)}>
+            返回加入书籍
+          </button>
+          <button type="button" className="board-btn" onClick={onClose}>
+            关闭
+          </button>
+        </div>
+      </>
+    );
+  }
 
   return (
     <>
       <div className="board-head">
-        <span className="board-title">放一本书 · {layer.name}</span>
-        <span className="board-sub">{error ?? (busy ? "正在写盘…" : "先落 md，再同步进库。")}</span>
+        <span className="board-title">加入书籍 · {layer.name}</span>
+        <span className="board-sub">
+          {error ?? (busy ? "正在写盘…" : "写成 md，再 sync 入库。")}
+        </span>
+        <button type="button" className="imp-corner" onClick={() => setTrashOpen(true)}>
+          从回收站取回
+        </button>
       </div>
+
       <div className="import-grid board-grid">
         <label className="imp">
-          <span>书名</span>
-          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="如：国富论" />
+          <span>{attach ? "挂到哪本书" : "书名"}</span>
+          {attach ? (
+            <div className="imp-line">
+              <select value={attachSlug} onChange={(e) => setAttachSlug(e.target.value)} autoFocus>
+                {allCourses.map((c) => (
+                  <option key={c.slug} value={c.slug}>
+                    {c.title}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="imp-link"
+                onClick={() => {
+                  setAttachSlug("");
+                  setChapterTouched(false);
+                }}
+              >
+                或写一本新书
+              </button>
+            </div>
+          ) : (
+            <div className="imp-line">
+              <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="如：国富论" />
+              {allCourses.length > 0 ? (
+                <button
+                  type="button"
+                  className="imp-link"
+                  onClick={() => {
+                    setAttachSlug(allCourses[0].slug);
+                    setChapterTouched(true);
+                  }}
+                >
+                  或选一本已有的
+                </button>
+              ) : null}
+            </div>
+          )}
         </label>
-        <label className="imp">
-          <span>学科</span>
-          <input value={discipline} onChange={(e) => setDiscipline(e.target.value)} placeholder="经济学（可留空）" />
-        </label>
+        {attach ? null : (
+          <label className="imp">
+            <span>学科</span>
+            <input value={discipline} onChange={(e) => setDiscipline(e.target.value)} placeholder="经济学（可留空）" />
+          </label>
+        )}
         <label className="imp">
           <span>章节名</span>
           <input
@@ -321,28 +485,17 @@ function ImportDialog({
               setChapterTouched(true);
               setChapterTitle(e.target.value);
             }}
-            placeholder="默认与书名相同"
+            placeholder={attach ? "这一章叫什么" : "默认与书名相同"}
           />
-        </label>
-        <label className="imp">
-          <span>挂到课程</span>
-          <select value={courseSlug} onChange={(e) => setCourseSlug(e.target.value)}>
-            <option value="">新建一门课程</option>
-            {allCourses.map((c) => (
-              <option key={c.slug} value={c.slug}>
-                {c.title}（{c.slug}）
-              </option>
-            ))}
-          </select>
         </label>
       </div>
 
       <div className="imp-file">
         <button type="button" className="board-btn" onClick={() => document.getElementById("imp-file")?.click()}>
-          读本地文件
+          从本地文件读入
         </button>
         <input id="imp-file" type="file" accept=".md,.markdown,.txt,text/plain" onChange={pickFile} />
-        <span className="board-sub">.md / .txt 直接读成正文，改完再放。</span>
+        <span className="board-sub">md / .txt，读进来就是下面的正文，可以先改再提交。</span>
       </div>
 
       <label className="imp wide-input">
@@ -351,17 +504,20 @@ function ImportDialog({
           className="board-textarea"
           value={body}
           onChange={(e) => setBody(e.target.value)}
-          placeholder="网页正文粘这儿，看一眼再放进去。"
+          placeholder="把网页正文粘在这里，会先原样显示，确认无误再点「加入」。"
           rows={6}
         />
       </label>
       <div className="board-actions">
-        <span className="board-sub">共 {body.length} 字符</span>
+        <span className="board-sub">
+          共 {body.length} 字符
+          {attach ? " · 挂到已有书只加一章" : ""}
+        </span>
         <button type="button" className="board-btn" onClick={onClose}>
           取消
         </button>
-        <button type="button" className="board-btn solid" onClick={submit} disabled={busy || !title.trim() || !body.trim()}>
-          放进去
+        <button type="button" className="board-btn solid" onClick={submit} disabled={busy || !canSubmit}>
+          加入
         </button>
       </div>
     </>
@@ -369,23 +525,51 @@ function ImportDialog({
 }
 
 // 立体书架：近景一层，远景整座塔；纯 CSS 3D，零依赖。
-const SEAL_DIGITS = ["一", "二", "三", "四", "五", "六", "七", "八", "九"];
+/** 层长按/拖动的一次按下状态；每次起手都从空白态开始 */
+type LayerPress = {
+  id: number;
+  x: number;
+  y: number;
+  dy: number;
+  moved: boolean;
+  long: boolean;
+  dragging: boolean;
+  timer: number;
+  top: number;
+  bottom: number;
+  left: number;
+  width: number;
+  height: number;
+};
 
-/** 铭牌用篆体渲染：阿拉伯数字换成汉字小写，避免篆书里混入西文数字 */
-function sealNum(name: string) {
-  return name
-    .replace(/[0-9]/g, (d) => SEAL_DIGITS[Number(d) - 1] ?? d)
-    .replace(/\s+/g, "");
-}
+const emptyPress = (): LayerPress => ({
+  id: 0,
+  x: 0,
+  y: 0,
+  dy: 0,
+  moved: false,
+  long: false,
+  dragging: false,
+  timer: 0,
+  top: 0,
+  bottom: 0,
+  left: 0,
+  width: 0,
+  height: 0,
+});
 
 function Shelf({
   layers,
-  gateOn,
+  writable,
+  readonlyOn,
+  onReadonlyOff,
   onOpen,
   onReload,
 }: {
   layers: ShelfLayer[];
-  gateOn: boolean;
+  writable: boolean;
+  readonlyOn: boolean;
+  onReadonlyOff: () => Promise<void>;
   onOpen: (slug: string) => void;
   onReload: () => Promise<void>;
 }) {
@@ -400,6 +584,8 @@ function Shelf({
   const [renameName, setRenameName] = useState("");
   const [renameBusy, setRenameBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [confirmDel, setConfirmDel] = useState<{ id: number; title: string } | null>(null);
+  const [delBusy, setDelBusy] = useState(false);
   const [picked, setPicked] = useState<ShelfLayer | null>(null);
   const [drag, setDrag] = useState<{ id: number; dy: number; overTrash: boolean } | null>(null);
   const [ghost, setGhost] = useState<{ top: number; left: number; width: number; height: number; name: string } | null>(
@@ -408,24 +594,11 @@ function Shelf({
   const [drop, setDrop] = useState<{ index: number; top: number; label: string } | null>(null);
   const dropRef = useRef(-1);
   const trashRef = useRef<HTMLDivElement | null>(null);
-  const [delBusy, setDelBusy] = useState(false);
   const [trashTop, setTrashTop] = useState<number | null>(null);
-  const [reorderBusy, setReorderBusy] = useState(false);
-  const press = useRef({
-    id: 0,
-    x: 0,
-    y: 0,
-    dy: 0,
-    moved: false,
-    long: false,
-    dragging: false,
-    timer: 0,
-    top: 0,
-    bottom: 0,
-    left: 0,
-    width: 0,
-    height: 0,
-  });
+  const bookDrag = useRef(createBookDrag());
+  const [bookView, setBookView] = useState<BookDragView | null>(null);
+  const bookSuppress = useRef(false);
+  const press = useRef<LayerPress>(emptyPress());
   const suppressClick = useRef(false);
   const overTrashRef = useRef(false);
 
@@ -452,10 +625,10 @@ function Shelf({
   };
 
   // 桶不跟视口走：底边钉在书架底线（远景 stage 底 -100）上方，横向贴着书架右侧
-  function measureTrash(el: HTMLElement) {
+  function measureTrash(el: HTMLElement): number | null {
     const wrap = el.closest(".shelf-wrap") as HTMLElement | null;
     const stage = wrap?.querySelector(".shelf-stage") as HTMLElement | null;
-    if (!wrap || !stage) return;
+    if (!wrap || !stage) return null;
     const wr = wrap.getBoundingClientRect();
     const sr = stage.getBoundingClientRect();
     let line = sr.bottom - (far ? 100 : 14);
@@ -470,7 +643,116 @@ function Shelf({
       });
       line = near;
     }
-    setTrashTop(Math.round(line - wr.top - 62));
+    const top = Math.round(line - wr.top - 62);
+    setTrashTop(top);
+    return top;
+  }
+
+  // 桶的矩形（与 .shelf-trash 的定位一致：右侧 14px、宽 64、高 62），按下那一刻交给拖拽核心。
+  function bucketBox(el: HTMLElement): BookBox | undefined {
+    const top = measureTrash(el);
+    const wrap = el.closest(".shelf-wrap") as HTMLElement | null;
+    if (top == null || !wrap) return undefined;
+    const wr = wrap.getBoundingClientRect();
+    const right = wr.right - 14;
+    return { left: right - 64, right, top: wr.top + top, bottom: wr.top + top + 62 };
+  }
+
+  // 近景拖书：几何与落点都算在 bookDrag.ts，这里只做三件事——
+  // 按下时交出矩形快照、把视图套到 className/--bx 上、松手后决定落不落库。
+  function bookDown(c: { id: number }, i: number, e: React.PointerEvent<HTMLButtonElement>) {
+    if (far) return;
+    const el = e.currentTarget;
+    const shelfEl = el.closest(".shelf") as HTMLElement | null;
+    if (!shelfEl) return;
+    const books = Array.from(shelfEl.querySelectorAll(".book")) as HTMLElement[];
+    bookDrag.current.press({
+      id: c.id,
+      index: i,
+      x: e.clientX,
+      y: e.clientY,
+      shelf: shelfEl.getBoundingClientRect(),
+      slots: books.map((b) => b.getBoundingClientRect()),
+      trash: bucketBox(el),
+    });
+    try {
+      el.setPointerCapture(e.pointerId);
+    } catch {
+      /* 某些指针类型不支持捕获，忽略 */
+    }
+  }
+
+  function bookMove(e: React.PointerEvent<HTMLButtonElement>) {
+    if (far) return;
+    const wasDragging = bookDrag.current.dragging;
+    const view = bookDrag.current.move(e.clientX, e.clientY);
+    if (!view) return;
+    if (!wasDragging) {
+      document.body.classList.add("book-dragging");
+      setFocus(view.from);
+    }
+    setBookView(view);
+  }
+
+  // 黑板上的「确认」：先关只读模式（如果开着），再把书移出。
+  async function deleteConfirmed() {
+    if (!confirmDel || delBusy) return;
+    setDelBusy(true);
+    try {
+      if (readonlyOn) await onReadonlyOff();
+      const r = await fetch("/api/course/delete", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id: confirmDel.id }),
+      });
+      if (!r.ok) {
+        const j = (await r.json().catch(() => ({}))) as { error?: string };
+        throw new Error(j.error ?? `HTTP ${r.status}`);
+      }
+      const j = (await r.json()) as { title: string; trash: string | null };
+      setConfirmDel(null);
+      setNotice(`已移出《${j.title}》，放在回收目录里，能手动找回。`);
+      await onReload();
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : "移出没成");
+    } finally {
+      setDelBusy(false);
+    }
+  }
+
+  async function bookUp() {
+    const drop = bookDrag.current.release();
+    document.body.classList.remove("book-dragging");
+    setBookView(null);
+    if (!drop) return;
+    // 拖完这一下紧跟的 click 不算点击，别顺手选中别的书
+    bookSuppress.current = true;
+    window.setTimeout(() => {
+      bookSuppress.current = false;
+    }, 400);
+    if (drop.overTrash) {
+      // 松手不算删完：先上黑板问一句，确认了才动库里那本书。
+      const title = sorted.flatMap((l) => l.courses).find((c) => c.id === drop.id)?.title ?? "这本书";
+      setConfirmDel({ id: drop.id, title });
+      setArmed(false);
+      return;
+    }
+    if (!drop.changed) return;
+    try {
+      const r = await fetch("/api/course/reorder", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id: drop.id, toIndex: drop.to }),
+      });
+      if (!r.ok) {
+        const j = (await r.json().catch(() => ({}))) as { error?: string };
+        throw new Error(j.error ?? `HTTP ${r.status}`);
+      }
+      await onReload();
+      setFocus(drop.to);
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : "换序没成");
+    }
   }
 
   // 长按层 = 选中（可拖动重排）；选中后再按住拖，松手存顺序。
@@ -569,7 +851,7 @@ function Shelf({
       setPicked(null);
       overTrashRef.current = false;
       dropRef.current = -1;
-      press.current = { id: 0, x: 0, y: 0, dy: 0, moved: false, long: false, dragging: false, timer: 0, top: 0, bottom: 0, left: 0, width: 0, height: 0 };
+      press.current = emptyPress();
       if (layer && layer.courses.length > 0) {
         setNotice(`这层有 ${layer.courses.length} 本书，先清空再删。`);
         return;
@@ -590,7 +872,6 @@ function Shelf({
       setGhost(null);
       dropRef.current = -1;
       if (toIndex !== fromIdx) {
-        setReorderBusy(true);
         try {
           const r = await fetch("/api/shelf/reorder", {
             method: "POST",
@@ -606,8 +887,6 @@ function Shelf({
           }
         } catch {
           setNotice("请求没发出去，服务还在跑吗？");
-        } finally {
-          setReorderBusy(false);
         }
       } else {
         setPicked(null);
@@ -618,11 +897,10 @@ function Shelf({
       setGhost(null);
       dropRef.current = -1;
     }
-    press.current = { id: 0, x: 0, y: 0, dy: 0, moved: false, long: false, dragging: false, timer: 0, top: 0, bottom: 0, left: 0, width: 0, height: 0 };
+    press.current = emptyPress();
   }
 
   async function doDelete(layer: ShelfLayer) {
-    setDelBusy(true);
     try {
       const r = await fetch("/api/shelf/delete", {
         method: "POST",
@@ -640,8 +918,6 @@ function Shelf({
       setNotice(`删掉了：${layer.name}。`);
     } catch {
       setNotice("请求没发出去，服务还在跑吗？");
-    } finally {
-      setDelBusy(false);
     }
   }
 
@@ -650,8 +926,8 @@ function Shelf({
       suppressClick.current = false;
       return;
     }
-    if (!gateOn) {
-      setNotice("改名要开迭代模式（设置页）。");
+    if (!writable) {
+      setNotice("只读模式开着，先去设置页关掉它。");
       return;
     }
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -724,8 +1000,8 @@ function Shelf({
       setBlocked(dir);
       return;
     }
-    if (!gateOn) {
-      setNotice("长层要开迭代模式（设置页）。");
+    if (!writable) {
+      setNotice("只读模式开着，先去设置页关掉它。");
       return;
     }
     const id = await addLayer(dir);
@@ -785,8 +1061,14 @@ function Shelf({
         if (c) onOpen(c.slug);
       } else if (e.key === "Escape") {
         e.preventDefault();
-        setEmptyLayer(null);
+        // Esc 是「退一层」的总闸：拖拽、确认卡、改名卡、越界提示、导入表单一起收掉。
+        bookDrag.current.cancel();
+        document.body.classList.remove("book-dragging");
+        setBookView(null);
         setImportLayer(null);
+        setConfirmDel(null);
+        setRename(null);
+        setBlocked(null);
         setFar(false);
         setCam({ x: 0, z: 0 });
         setArmed(true);
@@ -794,7 +1076,7 @@ function Shelf({
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [far, focus, current?.id, idx, sorted.length, gateOn]);
+  }, [far, focus, current?.id, idx, sorted.length, writable]);
 
   const height = (c: Course) => Math.min(240, 150 + c.chapters * 16);
   const now = current?.courses[focus];
@@ -812,53 +1094,78 @@ function Shelf({
             <ImportDialog
               layer={importLayer}
               layers={sorted}
+              writable={writable}
               onClose={() => setImportLayer(null)}
               onDone={async () => {
                 setImportLayer(null);
                 await onReload();
               }}
             />
+          ) : confirmDel ? (
+            <>
+              <div className="board-head">
+                <span className="board-title">要移出《{confirmDel.title}》吗</span>
+                <span className="board-sub">这一步会删掉这本书</span>
+              </div>
+              <p className="board-line">
+                文件挪到回收目录 content/.trash，能手动找回。
+                {readonlyOn ? "确认的同时会顺手关掉设置页的「只读模式」。" : ""}
+              </p>
+              <div className="board-actions">
+                <button type="button" className="board-btn" onClick={() => setConfirmDel(null)}>
+                  我知道了
+                </button>
+                <button
+                  type="button"
+                  className="board-btn solid"
+                  disabled={delBusy}
+                  onClick={() => void deleteConfirmed()}
+                >
+                  {delBusy ? "移出中…" : "确认"}
+                </button>
+              </div>
+            </>
           ) : blocked ? (
             <>
               <div className="board-head">
                 <span className="board-title">
-                  {blocked === "top" ? "上面那层还空着" : "下面那层还空着"}
+                  {blocked === "top" ? "上面那一层还空着" : "下面那一层还空着"}
                 </span>
                 <span className="board-sub">
                   {blocked === "top" ? sorted[sorted.length - 1]?.name : sorted[0]?.name}
                 </span>
               </div>
-              <p className="board-line">空层不叠第二个。那层先放一本书，塔才接着长。</p>
+              <p className="board-line">空着的架子不叠第二个。先往那一层放一本书，再继续长层。</p>
               <div className="board-actions">
                 <button type="button" className="board-btn" onClick={() => setBlocked(null)}>
-                  行
+                  知道了
                 </button>
               </div>
             </>
           ) : far && current && current.courses.length === 0 ? (
             <>
               <div className="board-head">
-                <span className="board-title">{current.name}，空的</span>
-                <span className="board-sub">全塔 {sorted.length} 层</span>
+                <span className="board-title">{current.name} 还没有书</span>
+                <span className="board-sub">共 {sorted.length} 层</span>
               </div>
               <p className="board-line">
-                {gateOn
-                  ? "本地 .md / .txt 丢进来，或者粘正文；点层名能改名。"
-                  : "加书要开迭代模式，设置页里那道开关。"}
+                {writable
+                  ? "可以选本地 .md / .txt，或者把网页正文粘进来；点层名还能给它改个名字。"
+                  : "只读模式开着，加入书籍要先关掉它（设置页）。"}
               </p>
               <div className="board-actions">
                 <button
                   type="button"
                   className="board-btn solid"
                   onClick={() => {
-                    if (!gateOn) {
-                      setNotice("加书要开迭代模式（设置页）。");
+                    if (!writable) {
+                      setNotice("只读模式开着，先去设置页关掉它。");
                       return;
                     }
                     setImportLayer(current);
                   }}
                 >
-                  放一本书
+                  加入书籍
                 </button>
               </div>
             </>
@@ -867,14 +1174,36 @@ function Shelf({
               <div className="board-head">
                 <span className="board-title">{far ? `远景 · ${current?.name ?? ""}` : "近景"}</span>
                 <span className="board-sub">
-                  {far ? `${sorted.length} 层 · 这层 ${current?.courses.length ?? 0} 本` : "只看一层"}
+                  {far ? `共 ${sorted.length} 层 · 本层 ${current?.courses.length ?? 0} 门课` : "一次只放一层"}
                 </span>
               </div>
               <p className="board-line">
                 {far
-                  ? "长按拖起来：挪到别处是换序，丢进右下角桶里就删（有书删不掉）；空层点一下改名。"
-                  : "按两下「退出」拉到远景：第一下复位，第二下才拉远。"}
+                  ? "长按一层拖动换位，拖进右下角的垃圾桶删掉空层；点左墙的牌子改名。"
+                  : "按「退出」两次拉远看整座塔：第一次复位，第二次才拉远。"}
               </p>
+              {!far && current ? (
+                <div className="board-actions">
+                  <button
+                    type="button"
+                    className="board-btn solid"
+                    onClick={() => {
+                      if (!writable) {
+                        setNotice("只读模式开着，先去设置页关掉它。");
+                        return;
+                      }
+                      setImportLayer(current);
+                    }}
+                  >
+                    加入书籍
+                  </button>
+                  <span className="board-sub">
+                    {writable
+                      ? "可以选本地 .md / .txt，或者把网页正文粘进来。"
+                      : "只读模式开着，加入书籍要先关掉它（设置页）。"}
+                  </span>
+                </div>
+              ) : null}
             </>
           )}
         </div>
@@ -995,14 +1324,29 @@ function Shelf({
                     }
                   }}
                 >
-                  <span className="layer-name">{sealNum(layer.name)}</span>
+                  <span
+                    className="layer-name"
+                    role="button"
+                    tabIndex={0}
+                    title={writable ? "点一下改层名" : "只读模式开着，改名要先关掉它"}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={(e) => startRename(layer, e)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        startRename(layer, e);
+                      }
+                    }}
+                  >
+                    {layer.name}
+                  </span>
                   <span className="shelf-side" />
                   {books.length === 0 ? (
                     <div
                       className="shelf ghost"
                       role="button"
                       tabIndex={0}
-                      title={gateOn ? "点一下改层名" : "改层名要先在设置页打开迭代模式"}
+                      title={writable ? "点一下改层名" : "只读模式开着，改层名要先关掉它"}
                       onClick={(e) => startRename(layer, e)}
                       onKeyDown={(e) => {
                         if (e.key === "Enter" || e.key === " ") {
@@ -1020,21 +1364,52 @@ function Shelf({
                         <button
                           key={c.id}
                           type="button"
-                          className={i === focus ? "book on" : "book"}
-                          style={{ "--h": `${height(c)}px` } as React.CSSProperties}
-                          onClick={() => setFocus(i)}
+                          className={["book", i === focus ? "on" : "", bookView?.id === c.id ? "dragging" : ""]
+                            .filter(Boolean)
+                            .join(" ")}
+                          style={
+                            {
+                              "--h": `${height(c)}px`,
+                              ...(bookView?.id === c.id ? { "--bx": `${bookView.dx}px` } : null),
+                            } as React.CSSProperties
+                          }
+                          onPointerDown={(e) => bookDown(c, i, e)}
+                          onPointerMove={bookMove}
+                          onPointerUp={() => void bookUp()}
+                          onPointerCancel={() => void bookUp()}
+                          onClick={() => {
+                            if (bookSuppress.current) {
+                              bookSuppress.current = false;
+                              return;
+                            }
+                            setFocus(i);
+                          }}
                           onDoubleClick={() => {
                             if (!far) onOpen(c.slug);
                           }}
-                          title={far ? c.title : `${c.title}（双击进入）`}
+                          title={far ? c.title : `${c.title}（双击进入，按住可以换序）`}
                         >
-                          <span className="book-spine">
-                            <em className="book-title">{c.title}</em>
-                            <i className="book-disc">{c.discipline}</i>
+                          <span className="book-3d">
+                            <span className="book-spine">
+                              <em className="book-title">{c.title}</em>
+                              <i className="book-disc">{c.discipline}</i>
+                            </span>
+                            <span className="book-side" />
                           </span>
-                          <span className="book-side" />
                         </button>
                       ))}
+                      {!far && bookView && !bookView.overTrash ? (
+                        <span
+                          className="book-slot"
+                          style={{
+                            left: `${bookView.slot.left}px`,
+                            top: `${bookView.slot.top}px`,
+                            height: `${bookView.slot.height}px`,
+                          }}
+                        >
+                          <em className="book-slot-tag">第 {bookView.to + 1} 位</em>
+                        </span>
+                      ) : null}
                       <span className="board" />
                     </div>
                   )}
@@ -1107,7 +1482,7 @@ function Shelf({
         </p>
       ) : null}
 
-      {drag ? (
+      {drag || bookView ? (
         <>
           {ghost ? (
             <div
@@ -1117,7 +1492,7 @@ function Shelf({
               <span className="echo-name">{ghost.name}</span>
             </div>
           ) : null}
-          {drop && ghost && !drag.overTrash ? (
+          {drop && ghost && !drag?.overTrash ? (
             <div className="drop-slot" style={{ top: drop.top, left: ghost.left, width: ghost.width }}>
               <span className="drop-label">{drop.label}</span>
             </div>
@@ -1125,20 +1500,28 @@ function Shelf({
           <div
             ref={trashRef}
             className={
-              drag.overTrash
-                ? dragLayer && dragLayer.courses.length > 0
-                  ? "shelf-trash blocked"
-                  : "shelf-trash hot"
-                : "shelf-trash"
+              bookView
+                ? bookView.overTrash
+                  ? "shelf-trash hot"
+                  : "shelf-trash"
+                : drag?.overTrash
+                  ? dragLayer && dragLayer.courses.length > 0
+                    ? "shelf-trash blocked"
+                    : "shelf-trash hot"
+                  : "shelf-trash"
             }
             style={trashTop == null ? undefined : { top: `${trashTop}px` }}
           >
             <span className="trash-label">
-              {!drag.overTrash
-                ? "拖到桶上就删这层"
-                : dragLayer && dragLayer.courses.length > 0
-                  ? "这层里还有书，删不掉"
-                  : "松手就删这层"}
+              {bookView
+                ? bookView.overTrash
+                  ? "松手会问你一句"
+                  : "拖到桶上就问你删不删"
+                : !drag?.overTrash
+                  ? "拖到桶上就删这层"
+                  : dragLayer && dragLayer.courses.length > 0
+                    ? "这层里还有书，删不掉"
+                    : "松手就删这层"}
             </span>
             <span className="trash-shadow" />
             <span className="trash-sill" />
@@ -1165,7 +1548,10 @@ function Shelf({
               onChange={(e) => setRenameName(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter") void saveRename();
-                if (e.key === "Escape") setRename(null);
+                if (e.key === "Escape") {
+                  e.stopPropagation();
+                  setRename(null);
+                }
               }}
             />
             <div className="rename-actions">
@@ -1184,7 +1570,17 @@ function Shelf({
   );
 }
 
-function Courses({ onOpen, gateOn }: { onOpen: (slug: string) => void; gateOn: boolean }) {
+function Courses({
+  onOpen,
+  writable,
+  readonlyOn,
+  onReadonlyOff,
+}: {
+  onOpen: (slug: string) => void;
+  writable: boolean;
+  readonlyOn: boolean;
+  onReadonlyOff: () => Promise<void>;
+}) {
   const [layers, setLayers] = useState<ShelfLayer[] | null>(null);
   const [layout, setLayout] = useState<Layout>(() =>
     localStorage.getItem(storeKey) === "shelf" ? "shelf" : "cards",
@@ -1250,7 +1646,14 @@ function Courses({ onOpen, gateOn }: { onOpen: (slug: string) => void; gateOn: b
       ) : layout === "cards" ? (
         <Cards items={allCourses} onOpen={onOpen} />
       ) : (
-        <Shelf layers={layers} gateOn={gateOn} onOpen={onOpen} onReload={reload} />
+        <Shelf
+          layers={layers}
+          writable={writable}
+          readonlyOn={readonlyOn}
+          onReadonlyOff={onReadonlyOff}
+          onOpen={onOpen}
+          onReload={reload}
+        />
       )}
     </section>
   );
@@ -1315,23 +1718,37 @@ function CourseView({
 function ChapterView({
   course,
   slug,
+  writable,
   onBack,
   onOpen,
 }: {
   course: string;
   slug: string;
+  writable: boolean;
   onBack: () => void;
   onOpen: (chapterSlug: string) => void;
 }) {
   const [data, setData] = useState<Chapter | null>(null);
   const [missing, setMissing] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [delAsk, setDelAsk] = useState(false);
+  const [delBusy, setDelBusy] = useState(false);
+
+  async function reload() {
+    const r = await fetch(`/api/chapter?course=${encodeURIComponent(course)}&slug=${encodeURIComponent(slug)}`);
+    if (!r.ok) throw new Error("404");
+    return (await r.json()) as Chapter;
+  }
 
   useEffect(() => {
     setData(null);
     setMissing(false);
-    fetch(`/api/chapter?course=${encodeURIComponent(course)}&slug=${encodeURIComponent(slug)}`)
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("404"))))
-      .then((c: Chapter) => {
+    setEditing(false);
+    reload()
+      .then((c) => {
         setData(c);
         // 打开即记一条浏览，不阻塞阅读
         fetch("/api/view", {
@@ -1342,6 +1759,56 @@ function ChapterView({
       })
       .catch(() => setMissing(true));
   }, [course, slug]);
+
+  async function save() {
+    if (!draft.trim()) {
+      setErr("正文不能为空。");
+      return;
+    }
+    setSaving(true);
+    setErr(null);
+    try {
+      const r = await fetch("/api/chapter/save", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ course, slug, body: draft }),
+      });
+      if (!r.ok) {
+        const j = (await r.json().catch(() => ({}))) as { error?: string };
+        throw new Error(j.error ?? `HTTP ${r.status}`);
+      }
+      const fresh = await reload().catch(() => null);
+      if (fresh) setData(fresh);
+      setEditing(false);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "保存失败");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // 删章是两段式：第一下只是把按钮变成「确认」，3 秒没再点就复原，不弹框。
+  async function deleteChapter() {
+    if (delBusy) return;
+    setDelBusy(true);
+    setErr(null);
+    try {
+      const r = await fetch("/api/chapter/delete", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ course, slug }),
+      });
+      if (!r.ok) {
+        const j = (await r.json().catch(() => ({}))) as { error?: string };
+        throw new Error(j.error ?? `HTTP ${r.status}`);
+      }
+      onBack();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "删除失败");
+      setDelBusy(false);
+    }
+    setDelAsk(false);
+  }
 
   if (missing) return <p className="hint">查无此章。</p>;
   if (!data) return <p className="hint">读取中…</p>;
@@ -1357,11 +1824,71 @@ function ChapterView({
       </div>
 
       <article className="chapter">
-        <h1 className="chapter-title">{data.title}</h1>
+        <div className="chapter-head">
+          <h1 className="chapter-title">{data.title}</h1>
+          {writable && !editing ? (
+            <button
+              type="button"
+              className="chapter-edit"
+              onClick={() => {
+                setDraft(data.body);
+                setErr(null);
+                setEditing(true);
+              }}
+            >
+              改正文
+            </button>
+          ) : null}
+          {!editing ? (
+            <button
+              type="button"
+              className={delAsk ? "chapter-del ask" : "chapter-del"}
+              disabled={delBusy}
+              onClick={() => {
+                if (delAsk) {
+                  void deleteChapter();
+                  return;
+                }
+                setDelAsk(true);
+                window.setTimeout(() => setDelAsk(false), 3000);
+              }}
+            >
+              {delBusy ? "删除中…" : delAsk ? "确认删除" : "删除"}
+            </button>
+          ) : null}
+        </div>
         <p className="chapter-meta">
           更新 {day(data.updatedAt)} · {data.body.replace(/\s+/g, "").length} 字
+          {editing ? " · 改的是 content 里的 md，存完立刻同步" : ""}
         </p>
-        <Markdown text={data.body} />
+        {editing ? (
+          <>
+            <textarea
+              className="chapter-editor"
+              value={draft}
+              spellCheck={false}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  e.stopPropagation();
+                  setEditing(false);
+                }
+              }}
+            />
+            {err ? <p className="chapter-err">{err}</p> : null}
+            <div className="chapter-acts">
+              <span className="chapter-count" style={{fontSize:12,color:"var(--ink-faint)",letterSpacing:"0.08em"}}>共 {draft.replace(/\s+/g, "").length} 字</span>
+              <button type="button" className="chapter-btn" onClick={() => setEditing(false)} disabled={saving}>
+                取消
+              </button>
+              <button type="button" className="chapter-btn primary" onClick={() => void save()} disabled={saving}>
+                {saving ? "保存中…" : "保存"}
+              </button>
+            </div>
+          </>
+        ) : (
+          <Markdown text={data.body} />
+        )}
       </article>
 
       <div className="pager">
@@ -1499,34 +2026,63 @@ function Recent({ onOpenChapter }: { onOpenChapter: (course: string, slug: strin
   );
 }
 
-function Settings() {
-  const { gate, busy, error, toggle } = useGate();
-  const on = gate?.on === true;
+function Settings({ readonly }: { readonly: ReturnType<typeof useSwitch> }) {
+  const gate = useSwitch("/api/gate");
+  const ro = readonly.state?.on === true;
+  const gateOn = gate.state?.on === true;
 
   return (
     <section className="page">
       <p className="eyebrow">设置</p>
-      <h1 className="headline">AI设置</h1>
-      <p className="lede">授权开关设置，不代表任何执行能力。</p>
+      <h1 className="headline">设置</h1>
+      <p className="lede">两个开关各管一摊：只读模式管操作，AI 迭代模式先空着。</p>
+
+      <div className="switch-row">
+        <div>
+          <div className="switch-title">只读模式</div>
+          <div className="switch-sub">
+            {readonly.state === null
+              ? "读取中…"
+              : ro
+                ? "只许看。加入书籍、改正文、改层名都先关掉它。"
+                : "可以改：加入书籍、改正文、改层名、换序。"}
+          </div>
+        </div>
+        <button
+          className={ro ? "switch on" : "switch"}
+          disabled={readonly.busy || readonly.state === null}
+          onClick={() => readonly.toggle(!ro)}
+          aria-pressed={ro}
+        >
+          <span className="knob" />
+        </button>
+      </div>
 
       <div className="switch-row">
         <div>
           <div className="switch-title">AI 学习文档迭代模式</div>
           <div className="switch-sub">
-            {gate === null
+            {gate.state === null
               ? "读取中…"
-              : on
-                ? "已授权。执行仍须在终端持 token 并跑 verify。"
-                : "未授权。任何迭代动作都会被拒绝。"}
+              : `游离开关，现在不指向任何功能${gateOn ? "（已置 on）" : "（已置 off）"}，二期接 AI 后才生效。`}
           </div>
         </div>
-        <button className={on ? "switch on" : "switch"} disabled={busy || gate === null} onClick={() => toggle(!on)} aria-pressed={on}>
+        <button
+          className={gateOn ? "switch on" : "switch"}
+          disabled={gate.busy || gate.state === null}
+          onClick={() => gate.toggle(!gateOn)}
+          aria-pressed={gateOn}
+        >
           <span className="knob" />
         </button>
       </div>
 
-      {error ? <p className="err">{error}</p> : null}
-      <p className="foot">授权时间：{gate?.updatedAt ? new Date(gate.updatedAt).toLocaleString("zh-CN") : "—"}</p>
+      {readonly.error ? <p className="err">{readonly.error}</p> : null}
+      {gate.error ? <p className="err">{gate.error}</p> : null}
+      <p className="foot">
+        只读模式：{readonly.state?.updatedAt ? new Date(readonly.state.updatedAt).toLocaleString("zh-CN") : "—"} · AI
+        迭代模式：{gate.state?.updatedAt ? new Date(gate.state.updatedAt).toLocaleString("zh-CN") : "—"}
+      </p>
     </section>
   );
 }
@@ -1535,12 +2091,28 @@ function App() {
   const [tab, setTab] = useState<Tab>("courses");
   const [view, setView] = useState<View>({ kind: "list" });
   const [query, setQuery] = useState("");
-  const { gate } = useGate();
+  const readonly = useSwitch("/api/readonly");
+  const readonlyOn = readonly.state?.on === true;
 
   function goCourses() {
     setTab("courses");
     setView({ kind: "list" });
   }
+
+  // Esc 在课程页 / 章节页 = 退一层。书架自己的 Esc 归 Shelf 管，这里只管视图栈。
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== "Escape") return;
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT")) return;
+      // 正文编辑态里的 Esc 归编辑器自己（取消编辑），别顺手把人送走
+      if (document.querySelector(".chapter-editor")) return;
+      if (tab !== "courses" || view.kind === "list") return;
+      setView({ kind: "list" });
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [tab, view]);
 
   function openSearch(q: string) {
     setQuery(q);
@@ -1559,7 +2131,7 @@ function App() {
 
   return (
     <div className="shell">
-      <Header tab={tab} setTab={switchTab} gate={gate} onSearch={openSearch} />
+      <Header tab={tab} setTab={switchTab} writable={!readonlyOn} onSearch={openSearch} />
       <main>
         {tab === "courses" ? (
           view.kind === "course" ? (
@@ -1572,18 +2144,24 @@ function App() {
             <ChapterView
               course={view.course}
               slug={view.slug}
+              writable={!readonlyOn}
               onBack={goCourses}
               onOpen={(s) => setView({ kind: "chapter", course: view.course, slug: s })}
             />
           ) : (
-            <Courses onOpen={(slug) => setView({ kind: "course", slug })} gateOn={gate?.on ?? false} />
+            <Courses
+              onOpen={(slug) => setView({ kind: "course", slug })}
+              writable={!readonlyOn}
+              readonlyOn={readonlyOn}
+              onReadonlyOff={() => readonly.toggle(false)}
+            />
           )
         ) : tab === "search" ? (
           <Search initial={query} onOpenChapter={openChapter} />
         ) : tab === "recent" ? (
           <Recent onOpenChapter={openChapter} />
         ) : (
-          <Settings />
+          <Settings readonly={readonly} />
         )}
       </main>
       <footer className="foot-note">M1 · 内容管道</footer>

@@ -42,6 +42,7 @@ npm run web:dev               # 前端开发 5173，/api 代理到 8790
 node .bench/bench.ts verify   # 迭代自检
 node .bench/bench.ts list     # 看说明书
 node .bench/bench.ts state    # 看授权位
+npm run typecheck             # tsc --noEmit（含 tests）
 npm test                      # node:test
 ```
 
@@ -55,12 +56,24 @@ npm test                      # node:test
 | `GET /api/recent` | 浏览记录，按最后打开倒序 |
 | `GET /api/course?slug=` | 课程详情：章节列表、字数、是否读过 |
 | `GET /api/chapter?course=&slug=` | 章节正文 + 上/下一章 |
+| `POST /api/chapter/save` | 改章节正文：只换 md 正文，front matter 与 uid 不动，写完立刻 sync |
 | `POST /api/view` | 记一次浏览，只累加次数与时间 |
-| `GET/POST /api/gate` | 唯一的授权开关；POST 仅回环、JSON、Origin 白名单 |
+| `GET /api/shelves` | 所有层，含层内课程（顺序即书架顺序） |
+| `POST /api/shelf` / `POST /api/shelf/rename` / `POST /api/shelf/delete` / `POST /api/shelf/reorder` | 建层 / 改名 / 删空层 / 层换位 |
+| `POST /api/course/reorder` | 层内书换序：只改这一层的 `sort_order` |
+| `POST /api/course/delete` | 整本书移出书架：目录移到 `content/.trash/`，章节与课程行删掉 |
+| `POST /api/chapter/delete` | 删一章：md 移到 `content/.trash/`，只删这一章的库行 |
+| `GET/POST /api/readonly` | 只读模式：开着就只许看，所有写操作 403 `readonly-on`；POST 仅回环、JSON、Origin 白名单 |
+| `GET/POST /api/gate` | AI 迭代模式：游离态，当前不指向任何功能，留给二期 |
 
-## 那道闸
+## 两个开关
 
-设置页只有一个开关「AI 学习文档迭代模式」，默认关。它只是**声明**：表示此刻允许 AI 按 skills 动手。真正的执行在终端，还要求 `.bench/token` 匹配，并且 verify 全绿。开关本身不提供任何能力。
+设置页两道开关，各管一摊：
+
+- **只读模式**（`readonly`，默认关）：和操作绑在一起。开着时只能看——加入书籍、改正文、改层名一律被后端拒（403 `readonly-on`），前端也不给入口。删除与换序不走这道闸。
+- **AI 学习文档迭代模式**（`bench.gate`，默认关）：**游离开关**，现在不指向任何功能，只为二期接 AI 时占位。开与不开，眼下都不影响任何操作。
+
+删除（整本书、单章、空层）不看开关，靠黑板上的二次确认兜底：书拖进桶松手只弹一句「要移出《X》吗」，点「我知道了」放下，点「确认」才动库，并且顺手把只读模式关掉——删东西这件事本身就是明确表态。
 
 ## 目录
 
@@ -73,6 +86,8 @@ npm test                      # node:test
 | `db/migrations/` | 结构变更，只增不改 |
 | `.bench/skills/30-layout.md` | 课程页两套排版（卡片 / 立体书架）的规格 |
 | `web/` | 四个页签：课程 / 检索 / 记录 / 设置 |
+| `web/src/bookDrag.ts` | 近景拖书的全部逻辑：阈值、落点、落位槽几何；不碰 React / DOM / 样式 |
+| `web/src/bookDrag.css` | 拖书的观感（浮起、虚线槽、位次标签）；删掉也照样能拖 |
 | `content/` | md 编辑源，M1 接入 sync |
 | `.bench/skills/` | 站点规格书，`00-charter.md` 是章程 |
 
@@ -116,8 +131,9 @@ M0 骨架 + M1 内容管道：3 门示例课 7 章（人工智能导论 / 分布
 - 拖层时有残影留在原位、红线和「放到第 N / M 位」标出落点、垃圾桶是一只具象的校园绿色翻盖桶（盖 + 提手、桶口深槽、桶身加强环），不带文字，状态只靠颜色，放在页面右侧、桶底压着书架底线，底下垫一小段与隔板同色的木台、台下有影子；重排和删空层不受迭代开关限制，新建层 / 导入 / 改名才需要它。
 - 空层也是一层书架——只有隔板，第一本书的位置上写着「（空）」。点它，层右边会浮出一张改名的半遮罩卡片。
 - **长按任意一层**（按住约半秒）直接进拖拽，页面右侧、与左侧柱子对称的位置浮出垃圾桶（桶底压在书架底线上、底下垫一小段木台）：拖到别的层松手 = 换位置；拖进垃圾桶松手 = 删掉这层（不再弹确认）。**只删空层**：层里有书时垃圾桶会变灰、写着「有书不能删」，松手只出一条提示，层不动。
+- 近景一层里多本书可以按住横着拖换序（移动不超过 8px 仍算点击/双击）：被拖的书浮起来、跟随指针横向移动，旁边一道虚线标「第 N 位」，松手把顺序写进 `courses.sort_order`；这段逻辑单拎在 `web/src/bookDrag.ts`，观感在 `web/src/bookDrag.css`。
 - 加书只能粘贴正文，或从本地 `.md / .txt` 读进来；挂到现有课程就是新章节，不选课程就是新开一门。写进去的是 md，接着才 sync 入库。
-- 这一步是写操作，必须在设置页把「迭代模式」开关打开；关着时后端直接拒（403）。
+- 这一步是写操作，必须先把设置页的「只读模式」关掉；开着时后端直接拒（403 `readonly-on`）。
 
 ## 请示入口
 

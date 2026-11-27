@@ -33,7 +33,6 @@ code {
 }
 
 input {
-  font-family: inherit;
   color: inherit;
 }
 
@@ -562,6 +561,135 @@ mark {
   max-width: 66ch;
 }
 
+.chapter-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.chapter-edit {
+  appearance: none;
+  flex: none;
+  margin-top: 8px;
+  padding: 3px 10px 4px;
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  background: transparent;
+  color: var(--ink-faint);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  transition: border-color 0.2s, color 0.2s;
+}
+
+.chapter-edit:hover {
+  border-color: #b6ab92;
+  color: var(--ink);
+}
+
+.chapter-del {
+  appearance: none;
+  flex: none;
+  margin-top: 8px;
+  padding: 3px 10px 4px;
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  background: transparent;
+  color: var(--ink-faint);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  transition: border-color 0.2s, color 0.2s;
+}
+
+.chapter-del:hover {
+  border-color: #b6ab92;
+  color: #8c4331;
+}
+
+.chapter-del.ask {
+  border-color: rgba(140, 67, 49, 0.5);
+  color: #8c4331;
+  background: rgba(140, 67, 49, 0.06);
+}
+
+.chapter-editor {
+  display: block;
+  width: 100%;
+  min-height: 46vh;
+  margin: 6px 0 0;
+  padding: 18px 20px;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  background: #fbf8f0;
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 15px;
+  line-height: 1.95;
+  resize: vertical;
+}
+
+.chapter-editor:focus {
+  outline: none;
+  border-color: #c3b89d;
+  box-shadow: 0 0 0 3px rgba(150, 138, 112, 0.08);
+}
+
+.chapter-err {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: #9c4a33;
+}
+
+.chapter-acts {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.chapter-count {
+  margin-right: auto;
+}
+
+.chapter-btn {
+  appearance: none;
+  padding: 5px 15px 6px;
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  background: transparent;
+  color: var(--ink-soft);
+  font-family: inherit;
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  transition: border-color 0.2s, color 0.2s, background 0.2s;
+}
+
+.chapter-btn:hover {
+  border-color: #b6ab92;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.chapter-btn.primary {
+  border-color: #2b2620;
+  background: #2b2620;
+  color: #f2e8d2;
+}
+
+.chapter-btn.primary:hover {
+  background: #3a332b;
+  border-color: #3a332b;
+}
+
+.chapter-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .chapter-title {
   font-size: 32px;
   font-weight: 500;
@@ -796,15 +924,26 @@ mark {
   width: 48px;
   height: var(--h, 240px);
   cursor: pointer;
+  /* 按钮本身保持平面：3D 旋转交给 .book-3d，命中区才是稳的矩形。
+     否则 rotateY 之后只有右半边能点到，左半边会漏给 .shelf。 */
+  transform-style: flat;
+}
+
+.book-3d {
+  position: absolute;
+  inset: 0;
   transform-style: preserve-3d;
-  transform: rotateY(-26deg);
+  transform: rotateY(-26deg) translate3d(var(--bx, 0px), 0, 0);
   transition: transform 0.42s cubic-bezier(0.22, 0.69, 0.21, 1), filter 0.3s;
 }
 
 .book.on {
-  transform: rotateY(-4deg) translateZ(84px);
-  filter: drop-shadow(0 20px 28px rgba(27, 25, 23, 0.26));
   z-index: 2;
+}
+
+.book.on .book-3d {
+  transform: rotateY(-4deg) translate3d(var(--bx, 0px), 0, 0) translateZ(84px);
+  filter: drop-shadow(0 20px 28px rgba(27, 25, 23, 0.26));
 }
 
 .book-spine {
@@ -1062,12 +1201,6 @@ mark {
   transition: transform 0.6s cubic-bezier(0.22, 0.69, 0.21, 1), opacity 0.35s;
 }
 
-@font-face {
-  font-family: "Seal Script";
-  src: url("/fonts/JFZSKSealScript.woff2") format("woff2");
-  font-display: swap;
-}
-
 .layer-name {
   position: absolute;
   bottom: 6px;
@@ -1077,10 +1210,11 @@ mark {
   display: inline-block;
   padding: 3px 10px 4px;
   white-space: nowrap;
-  font-family: "Seal Script", "Songti SC", serif;
+  font-family: inherit;
   font-size: 12px;
   line-height: 1.15;
   letter-spacing: 0.06em;
+  cursor: pointer;
   color: #f2e5cb;
   background: linear-gradient(180deg, #543c26 0%, #46301d 42%, #382515 74%, #2b1b0f 100%);
   border: 1px solid #b1904f;
@@ -1114,8 +1248,8 @@ mark {
   padding: 8px 6px 9px;
   writing-mode: vertical-rl;
   text-orientation: upright;
-  font-size: 31px;
-  line-height: 1.05;
+  font-size: 27px;
+  line-height: 1.1;
   letter-spacing: 0.02em;
   border-radius: 3px;
 }
@@ -2076,3 +2210,102 @@ mark {
   opacity: 0.8;
 }
 
+
+/* 导入表单：书名一栏的双态控件 + 回收站视图 */
+.imp-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.imp-line input,
+.imp-line select {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.imp-link {
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: 0;
+  font-family: inherit;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: #cfc7ab;
+  border-bottom: 1px dotted rgba(207, 199, 171, 0.6);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.imp-link:hover {
+  color: #f4f0de;
+  border-bottom-color: #f4f0de;
+}
+
+.imp-corner {
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: 0;
+  margin-left: auto;
+  font-family: inherit;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: #cfc7ab;
+  border-bottom: 1px dotted rgba(207, 199, 171, 0.6);
+  cursor: pointer;
+}
+
+.imp-corner:hover {
+  color: #f4f0de;
+  border-bottom-color: #f4f0de;
+}
+
+.trash-pick {
+  margin-top: 10px;
+  max-height: 42vh;
+  overflow: auto;
+}
+
+.trash-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.trash-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 7px 0;
+  border-bottom: 1px dotted rgba(226, 221, 202, 0.35);
+  font-size: 13px;
+  color: #e2ddca;
+}
+
+.trash-row:last-child {
+  border-bottom: 0;
+}
+
+.trash-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trash-meta {
+  flex: 0 0 auto;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: #a8a48c;
+}
+
+.trash-row .board-btn {
+  flex: 0 0 auto;
+  padding: 4px 12px;
+  font-size: 12px;
+}

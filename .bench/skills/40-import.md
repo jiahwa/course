@@ -15,9 +15,9 @@ last-applied: 2026-11-25
 1. 回环地址（只服务本机）。
 2. `content-type: application/json`。
 3. `Origin` 在白名单（`http://127.0.0.1:8790`、`http://localhost:8790`、`http://127.0.0.1:5173`）。
-4. `settings['bench.gate'] = on`。
+4. `settings['readonly'] = off`（只读模式关着）。
 
-第 4 条不满足时返回 `403 { code:"gate-off" }`，文案是「迭代模式未开启：请先在设置页打开那道开关」。开关只在设置页，界面之外没有别的入口；`.bench/` 不加任何路由。
+第 4 条不满足时返回 `403 { code:"readonly-on" }`，文案是「只读模式开着：请先去设置页关掉它」。开关只在设置页，界面之外没有别的入口；`.bench/` 不加任何路由。`bench.gate` 是游离开关，不参与任何写操作判断。
 
 ## 层（shelves）
 

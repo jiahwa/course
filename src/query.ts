@@ -150,6 +150,40 @@ export function reorderShelf(db: DatabaseSync, id: number, toIndex: number) {
   return { ok: true, id, ord: at + 1, total: list.length };
 }
 
+// 层内书换序：只动这一层的 sort_order（连续递增，从该层现值的最小值起），
+// 别的层不受影响；同层 = 同一个 shelf_id（含 null 那组）。
+export function reorderCourse(db: DatabaseSync, id: number, toIndex: number) {
+  const row = db.prepare("SELECT id, shelf_id FROM courses WHERE id = ?").get(id) as
+    | { id: number; shelf_id: number | null }
+    | undefined;
+  if (!row) return { error: "没有这本书" as const, missing: true };
+  if (!Number.isInteger(toIndex)) return { error: "位置不对" as const };
+
+  const where = row.shelf_id === null ? "shelf_id IS NULL" : "shelf_id = ?";
+  const args = row.shelf_id === null ? [] : [row.shelf_id];
+  const rows = db
+    .prepare(`SELECT id, sort_order FROM courses WHERE ${where} ORDER BY sort_order, discipline, title`)
+    .all(...args) as Array<{ id: number; sort_order: number }>;
+
+  const idx = rows.findIndex((r) => r.id === id);
+  if (idx < 0) return { error: "没有这本书" as const, missing: true };
+  const list = rows.filter((r) => r.id !== id);
+  const at = Math.max(0, Math.min(list.length, toIndex));
+  if (at === idx) return { ok: true, id, index: idx + 1, total: rows.length, unchanged: true };
+
+  list.splice(at, 0, rows[idx]);
+  const base = rows.reduce((m, r) => Math.min(m, r.sort_order), rows[0].sort_order);
+  db.exec("BEGIN");
+  try {
+    list.forEach((r, i) => db.prepare("UPDATE courses SET sort_order = ? WHERE id = ?").run(base + i, r.id));
+    db.exec("COMMIT");
+  } catch (e) {
+    db.exec("ROLLBACK");
+    throw e;
+  }
+  return { ok: true, id, index: at + 1, total: list.length };
+}
+
 function cut(text: string, term: string, radius = 56): string {
   const flat = text.replace(/\s+/g, " ");
   const idx = flat.toLowerCase().indexOf(term.toLowerCase());

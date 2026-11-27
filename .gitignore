@@ -7,3 +7,4 @@ db/course.db-wal
 .bench/snapshots/*
 .bench/log/*
 .DS_Store
+content/.trash/

@@ -1,8 +1,8 @@
 ---
 name: charter
 scope: 全站
-covers: [content:uid, content:md, script:sync, schema:settings, schema:courses, schema:chapters, schema:views, schema:events, schema:chapters_fts, schema:shelves, api:/api/health, api:/api/courses, api:/api/search, api:/api/recent, api:/api/view, api:/api/chapter, api:/api/course, api:/api/gate, api:/api/shelves, api:/api/shelf, api:/api/shelf/rename, api:/api/shelf/delete, api:/api/shelf/reorder, api:/api/import, web:courses, ui:layout, ui:shelf, ui:layers, ui:import, web:course, web:chapter, web:search, web:recent, web:settings]
-last-applied: 2026-11-25
+covers: [content:uid, content:md, script:sync, schema:settings, schema:courses, schema:chapters, schema:views, schema:events, schema:chapters_fts, schema:shelves, api:/api/health, api:/api/courses, api:/api/search, api:/api/recent, api:/api/view, api:/api/chapter, api:/api/course, api:/api/gate, api:/api/shelves, api:/api/shelf, api:/api/shelf/rename, api:/api/shelf/delete, api:/api/shelf/reorder, api:/api/import, api:/api/chapter/save, web:courses, ui:layout, ui:shelf, ui:layers, ui:import, ui:edit, ui:bookdrag, api:/api/course/reorder, api:/api/course/delete, api:/api/chapter/delete, ui:bookdelete, ui:chapterdel, content:trash, api:/api/readonly, ui:readonly, ui:delconfirm, web:course, web:chapter, web:search, web:recent, web:settings]
+last-applied: 2026-11-27
 ---
 
 # 00 · 章程
